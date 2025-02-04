@@ -1,12 +1,3 @@
----
-title: "1_lettuce_salad"
-author: "AmirAli Toghani"
-date: "2025-02-04"
-output: html_document
-editor_options: 
-  chunk_output_type: console
----
-
 ```{r}
 library(tidyverse)
 library(readxl)
