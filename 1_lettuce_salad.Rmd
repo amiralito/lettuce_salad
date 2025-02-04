@@ -1,0 +1,595 @@
+---
+title: "1_lettuce_salad"
+author: "AmirAli Toghani"
+date: "2025-02-04"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(Biostrings)
+library(ggtree)
+library(pheatmap)
+library(reshape2)
+library(svglite)
+```
+
+
+#### 1. import genomes metadata file
+```{r}
+metadata <- read_xlsx("/path/to/supplementary/Data_S1.xlsx")
+
+species_meta <- metadata[,c(1,6,7,15,16,17,18)]
+```
+
+
+#### 2. Import Asterales sequence and metadata:
+```{r}
+# from the Zenodo dateset
+setwd("/path/to/Asterales/nlrtracker")
+
+Asterales_meta <- species_meta[species_meta$Order == "Asterales",]
+
+Asterales_files <- list.files(pattern = "_Domains.tsv", recursive = T)
+
+Asterales_list <- list()
+
+# Loop through each file
+for (i in seq_along(Asterales_files)) {
+  # Read the Excel file
+  Asterales_list[[i]] <- read_delim(Asterales_files[i])
+  
+  # Extract the specific part of the file name and add it as a new column
+  Asterales_list[[i]] <- Asterales_list[[i]] %>%
+    mutate('Assembly Accession' = gsub(".*_(GCA|GCF)_([0-9]+\\.[0-9]+)_.*", "\\1_\\2", basename(Asterales_files[i])))
+
+  # Print a message for each file (optional)
+  cat("Read file:", Asterales_files[i], "and added formatted filename column\n")
+}
+
+# merge all and add the metadata
+Asterales <- do.call(rbind,Asterales_list) %>% inner_join(species_meta, by = "Assembly Accession")
+
+Asterales <- Asterales %>% 
+  mutate(ID = paste(Species, seqname, Simple, sep = "_")) %>%
+  # Replace spaces in the "Species" column with underscores for the "ID" column
+  mutate(ID = gsub(" ", "_", ID))
+```
+
+
+#### 3. Import Solanales sequence and metadata:
+```{r}
+# from the Zenodo dateset
+setwd("/path/to/Solanales/nlrtracker")
+
+Solanales_meta <- species_meta[species_meta$Order == "Solanales",]
+
+Solanales_files <- list.files(pattern = "_Domains.tsv", recursive = T)
+
+Solanales_list <- list()
+
+# Loop through each file
+for (i in seq_along(Solanales_files)) {
+  # Read the Excel file
+  Solanales_list[[i]] <- read_delim(Solanales_files[i])
+  
+  # Extract the specific part of the file name and add it as a new column
+  Solanales_list[[i]] <- Solanales_list[[i]] %>%
+    mutate('Assembly Accession' = gsub(".*_(GCA|GCF)_([0-9]+\\.[0-9]+)_.*", "\\1_\\2", basename(Solanales_files[i])))
+
+  # Print a message for each file (optional)
+  cat("Read file:", Solanales_files[i], "and added formatted filename column\n")
+}
+
+# modify the non-ncbi genome nomenclatrue
+Solanales_list[[40]] <- Solanales_list[[40]] %>%
+    mutate('Assembly Accession' = gsub("nlrtracker_GWHCAWW00000000.genome_helixer_protein.fasta_Domains.tsv", "GWHCAWW00000000", basename(Solanales_files[40])))
+
+# merge all and add the metadata
+Solanales <- do.call(rbind,Solanales_list) %>% inner_join(species_meta, by = "Assembly Accession")
+
+
+Solanales <- Solanales %>% 
+  mutate(ID = paste(Species, seqname, Simple, sep = "_")) %>%
+  # Replace spaces in the "Species" column with underscores for the "ID" column
+  mutate(ID = gsub(" ", "_", ID))
+
+```
+
+
+#### 4. Prepare the functions and prerequisites:
+```{r}
+# Function to remove duplicates based on "sequence" column
+remove_duplicates_by_sequence <- function(df) {
+  # Filter out rows with duplicate "sequence" values
+  df %>% distinct(sequence, .keep_all = TRUE)
+}
+
+domains <- c("CNL","CNLO","CN","OCNL","CONL",
+             "NL","NLO","ONL",
+             "BCNL","BNL","BCN","BCCNL","BNLO","BOCNL",
+             "RNL",
+             "TN","TNL","TNLO","TNLJ")
+
+```
+
+
+#### 5. Merge the two orders and process:
+```{r}
+
+Solanales_Asterales <- rbind(Solanales, Asterales)
+
+
+Solanales_Asterales_NLR <- filter(Solanales_Asterales, Solanales_Asterales$type == "CHAIN" & Solanales_Asterales$Status == "NLR")
+
+# only keep the desired domain architectures and deduplicate NLRs
+Solanales_Asterales_NLR_filtered <- Solanales_Asterales_NLR[Solanales_Asterales_NLR$Simple %in% domains,]
+
+Solanales_Asterales_NLR_filtered_deduplicated <- remove_duplicates_by_sequence(Solanales_Asterales_NLR_filtered)
+
+
+# extract the NBARC domains
+Solanales_Asterales_NBARC <- Solanales_Asterales[Solanales_Asterales$description == "NBARC",]
+
+Solanales_Asterales_NBARC_filtered_deduplicated <- Solanales_Asterales_NBARC[Solanales_Asterales_NBARC$seqname %in% Solanales_Asterales_NLR_filtered_deduplicated$seqname,]
+
+
+# filter out NLRs with truncated NBARC domain
+
+Solanales_Asterales_NBARC_filtered_deduplicated_len <- filter(Solanales_Asterales_NBARC_filtered_deduplicated, 
+                                                              Solanales_Asterales_NBARC_filtered_deduplicated$end - Solanales_Asterales_NBARC_filtered_deduplicated$start > 250 &
+                                                              Solanales_Asterales_NBARC_filtered_deduplicated$end - Solanales_Asterales_NBARC_filtered_deduplicated$start < 400)
+
+
+
+Solanales_Asterales_NLR_filtered_deduplicated_len <- Solanales_Asterales_NLR_filtered_deduplicated[Solanales_Asterales_NLR_filtered_deduplicated$seqname %in% Solanales_Asterales_NBARC_filtered_deduplicated_len$seqname,]
+
+
+
+# convert the final data to biostring objects
+
+Solanales_Asterales_NLR_filtered_deduplicated_len_seq <- AAStringSet(Solanales_Asterales_NLR_filtered_deduplicated_len$sequence)
+Solanales_Asterales_NLR_filtered_deduplicated_len_seq@ranges@NAMES <- Solanales_Asterales_NLR_filtered_deduplicated_len$ID
+
+
+Solanales_Asterales_NBARC_filtered_deduplicated_len_seq <- AAStringSet(Solanales_Asterales_NBARC_filtered_deduplicated_len$sequence)
+Solanales_Asterales_NBARC_filtered_deduplicated_len_seq@ranges@NAMES <- Solanales_Asterales_NBARC_filtered_deduplicated_len$ID
+
+
+```
+
+
+#### 6. Import RefPlantNLR and add it to the datasets and export:
+```{r}
+
+RefPlantNLR <- readAAStringSet("/path/to/RefPlantNLR.fasta")
+RefPlantNLR_NBARC <- readAAStringSet("/path/to/RefPlantNLR_NBARC.fasta")
+
+
+all_ref <- c(Solanales_Asterales_NLR_filtered_deduplicated_len_seq, RefPlantNLR)
+all_ref_NBARC <- c(Solanales_Asterales_NBARC_filtered_deduplicated_len_seq, RefPlantNLR_NBARC)
+
+# export for Phylogenetic analysis
+writeXStringSet(all_ref_NBARC,"/path/to/all_ref_nbarc.fasta")
+writeXStringSet(all_ref,"/path/to/all_ref.fasta")
+
+# extract ZAR1 as the outgroup for smaller clades
+ZAR1 <- RefPlantNLR[c("ZAR1","NbZAR1")]
+ZAR1_NBARC <- RefPlantNLR_NBARC[c("ZAR1","NbZAR1")]
+
+
+# extract SlNRC2 and SlNRC0 as reference NRCs
+NRC_ref <- RefPlantNLR[c("NRC0","NRC2")]
+NRC_ref_NBARC <- RefPlantNLR_NBARC[c("NRC0","NRC2")]
+
+```
+
+
+#### 7. generate the phylogenetic tree of all NLRs:
+```{bash}
+famsa all_ref_nbarc.fasta all_ref_nbarc_famsa.afa
+
+FastTree -lg all_ref_nbarc_famsa.afa > all_ref_nbarc_famsa.newick
+```
+
+
+#### 8. Extract the NRC clade with a paraphyletic subclade (CcRPP1) and import:
+```{r}
+
+NRC_clade_para <- read.tree("/path/to/NRC_clade_para.tree")
+
+NRC_para_ref_NBARC <- all_ref_NBARC[all_ref_NBARC@ranges@NAMES %in% NRC_clade_para$tip.label]
+
+# export the NBARC sequences to generate a new phylogenetic tree
+writeXStringSet(NRC_para_ref_NBARC,"/path/to/NRC_clade_para_NBARC.fasta")
+
+```
+
+
+#### 9. generate the phylogenetic tree the NRC superclade + CcRPP1 paraphyletic clade:
+```{bash}
+mafft --anysymbol NRC_clade_para_NBARC.fasta > NRC_clade_para_NBARC.afa
+
+FastTree -lg NRC_clade_para_NBARC.afa > NRC_clade_para_NBARC.newick
+```
+
+
+#### 10. Extract the NRC clade and import :
+```{r}
+
+NRC_clade <- read.tree("/path/to/NRC_clade.tree")
+
+NRC_NBARC_ref_seq <- all_ref_NBARC[all_ref_NBARC@ranges@NAMES %in% NRC_clade$tip.label]
+NRC_NBARC_seq <- Solanales_Asterales_NBARC_filtered_deduplicated_len_seq[Solanales_Asterales_NBARC_filtered_deduplicated_len_seq@ranges@NAMES %in% NRC_clade$tip.label]
+
+NRC_ref_seq <- all_ref[all_ref_NBARC@ranges@NAMES %in% NRC_clade$tip.label]
+NRC_seq <- Solanales_Asterales_NLR_filtered_deduplicated_len_seq[Solanales_Asterales_NLR_filtered_deduplicated_len_seq@ranges@NAMES %in% NRC_clade$tip.label]
+
+```
+
+
+#### 11. Extract the NRC superclade metadata and generate the annotations for iTOL:
+```{r}
+
+NRC_clade_metadata <- Solanales_Asterales_NLR_filtered_deduplicated_len[Solanales_Asterales_NLR_filtered_deduplicated_len$ID %in% NRC_clade$tip.label,]
+
+
+NRC_clade_metadata_annot <- NRC_clade_metadata[,c(18,14,15)]
+
+# annotate the data for iTOL
+NRC_clade_metadata_annot <- NRC_clade_metadata_annot %>% mutate(Order_col = case_when(
+  Order == "Solanales" ~ "#DA3626",
+  Order == "Asterales" ~ "#04B9E8",
+  TRUE ~ NA
+))
+
+NRC_clade_metadata_annot <- NRC_clade_metadata_annot %>% mutate(Family_col = case_when(
+  Family == "Asteraceae" ~ "#003049",
+  Family == "Campanulaceae" ~ "#669bbc",
+  Family == "Convolvulaceae" ~ "#c1121f",
+  Family == "Solanaceae" ~ "#780000",
+  TRUE ~ NA
+))
+
+# to be used with iTOL annotator
+write_csv(NRC_clade_metadata_annot,"/path/to/NRC_clade_metada_annot.csv")
+
+```
+
+
+#### 12. Extract the NRC subclades from the refined NRC tree:
+```{r}
+NRCH_clade <- read.tree("/path/to/NRCH_clade.tree")
+NRCH_clade_metadata <- NRC_clade_metadata[NRC_clade_metadata$ID %in% NRCH_clade$tip.label,]
+
+
+NRC0_clade <- read.tree("/path/to/NRC0_clade.tree")
+NRC0_clade_metadata <- NRC_clade_metadata[NRC_clade_metadata$ID %in% NRC0_clade$tip.label,]
+
+
+NRCH_other_clade <- read.tree("/path/to/NRCH_other_clade.tree")
+NRCH_other_clade_metadata <- NRC_clade_metadata[NRC_clade_metadata$ID %in% NRCH_other_clade$tip.label,]
+
+
+NRC_SD_clade <- read.tree("/path/to/NRCS_SD.tree")
+NRC_SD_clade_metadata <- NRC_clade_metadata[NRC_clade_metadata$ID %in% NRC_SD_clade$tip.label,]
+
+
+NRC_Rx_clade <- read.tree("/path/to/NRCS_Rx.tree")
+NRC_Rx_clade_metadata <- NRC_clade_metadata[NRC_clade_metadata$ID %in% NRC_Rx_clade$tip.label,]
+
+```
+
+
+#### 13. Calculate the number of each type for each species:
+```{r}
+NLR_freq <- table(Solanales_Asterales_NLR_filtered_deduplicated_len$Species) %>% as.data.frame() %>% setNames(c("Species","NLR"))
+NRC_freq <- table(NRC_clade_metadata$Species) %>% as.data.frame() %>% setNames(c("Species","NRC network"))
+NRC0_freq <- table(NRC0_clade_metadata$Species) %>% as.data.frame() %>% setNames(c("Species","NRC0 clade"))
+NRCH_other_freq <- table(NRCH_other_clade_metadata$Species) %>% as.data.frame() %>% setNames(c("Species","NRC Helper other"))
+
+NRC_Rx_clade_freq <- table(NRC_Rx_clade_metadata$Species) %>% as.data.frame() %>% setNames(c("Species","NRC Rx-type sensor"))
+NRC_SD_clade_freq <- table(NRC_SD_clade_metadata$Species) %>% as.data.frame() %>% setNames(c("Species","NRC Sd-type sensor"))
+
+
+# quick function to merge the frequency tables
+
+merge_dfs <- function(...) {
+  # Reduce function combines dataframes with inner_join
+  merged_df <- Reduce(full_join, list(...))
+  
+  # Replace NA with 0 in all columns except "Species"
+  merged_df[, !(names(merged_df) %in% "Species")] <- 
+    lapply(merged_df[, !(names(merged_df) %in% "Species")], function(x) replace(x, is.na(x), 0))
+  
+  return(merged_df)
+}
+
+freq_table <- merge_dfs(NRC_freq, NRC0_freq, NRCH_other_freq, NRC_Rx_clade_freq, NRC_SD_clade_freq)
+
+
+NLR_freq$NRC_percentage <- freq_table$`NRC network` / NLR_freq$NLR * 100
+
+
+
+species_meta_minimal <- species_meta[,c(4,5,6,7)] %>% unique()
+
+
+freq_table <- freq_table %>% left_join(species_meta_minimal, by = "Species")
+NLR_freq <- NLR_freq %>% left_join(species_meta_minimal, by = "Species")
+
+# reorder the species based on the speceies phylogenetic tree
+species_sort <- read_csv("~/Desktop/Lettuce_salad/figures/trees/spceies_sort.txt", col_names = F) %>% setNames("Species")
+
+freq_table <- species_sort %>% left_join(freq_table, by = "Species")
+NLR_freq <- species_sort %>% left_join(NLR_freq, by = "Species")
+
+
+# export the tables
+write_csv(freq_table,"/path/to/freq_table.csv")
+write_csv(NLR_freq,"/path/to/NLR_freq.csv")
+
+```
+
+
+#### 14. Custom theme for the plots:
+```{r}
+theme_custom <- theme(
+  axis.text.x = element_blank(),
+  axis.ticks = element_blank(),
+  axis.title = element_blank(),
+  legend.position = "none",
+  panel.background = element_rect(fill = "transparent", colour = NA), # No fill, no border
+  plot.background = element_rect(fill = "transparent", colour = NA), # No fill, no border
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  plot.margin = unit(c(0,0,0,0), "lines"),
+  plot.title = element_blank(),
+  plot.subtitle = element_blank(),
+  plot.caption = element_blank(),
+  panel.border = element_blank()
+)
+```
+
+
+#### 15. Prepare the data and plot it:
+```{r}
+freq_table_melted <- melt(freq_table, id.vars = c("Species", "Order","Family","Genus"))
+freq_table_melted$value <- as.numeric(freq_table_melted$value)
+
+freq_table_melted$Species <- factor(freq_table_melted$Species, levels = rev(unique(freq_table_melted$Species)))
+
+
+freq_table_melted_Asterales <- freq_table_melted[freq_table_melted$Order == "Asterales",]
+freq_table_melted_Solanales <- freq_table_melted[freq_table_melted$Order == "Solanales",]
+
+
+
+NLR_freq_melted <- melt(NLR_freq, id.vars = c("Species", "Order","Family","Genus"))
+NLR_freq_melted$value <- as.numeric(NLR_freq_melted$value)
+
+NLR_freq_melted$Species <- factor(NLR_freq_melted$Species, levels = rev(unique(NLR_freq_melted$Species)))
+
+
+NLR_freq_melted_Asterales <- NLR_freq_melted[NLR_freq_melted$Order == "Asterales",]
+NLR_freq_melted_Asterales_NLR <- NLR_freq_melted_Asterales %>% filter(variable == "NLR")
+NLR_freq_melted_Asterales_NRC <- NLR_freq_melted_Asterales %>% filter(variable == "NRC_percentage")
+
+NLR_freq_melted_Solanales <- NLR_freq_melted[NLR_freq_melted$Order == "Solanales",]
+NLR_freq_melted_Solanales_NLR <- NLR_freq_melted_Solanales %>% filter(variable == "NLR")
+NLR_freq_melted_Solanales_NRC <- NLR_freq_melted_Solanales %>% filter(variable == "NRC_percentage")
+
+
+myColors <- c("#353535","#ffffff","#bf0603")
+
+### NRC frequencies
+ggplot(freq_table_melted_Asterales, aes(y = Species, x = variable)) +
+  geom_tile(aes(fill = log(value)), colour = "white", linejoin = "round") +
+  geom_text(aes(label = sprintf("%d", value)), size = 5) +
+  scale_fill_gradient(low = "white", high = "#ff6700", limits = c(0, log(750))) +
+  theme_minimal() +
+  theme_custom +
+  coord_fixed()  # Make the tiles square
+
+ggsave(width = 8, height = 14.5, filename = "/path/to/Asteralaes_freq.svg", dpi = "retina", device = "svg")
+
+
+### NLR frequencies
+## Asterales
+# NLR
+ggplot(NLR_freq_melted_Asterales_NLR, aes(y = Species, x = variable)) +
+  geom_tile(aes(fill = value), colour = "white", linejoin = "round") +
+  geom_text(aes(label = sprintf("%d", value)), size = 5) +
+  scale_fill_gradient2(low = "white", mid = "#4361ee", high = "#b5179e", midpoint = 1000, limits = c(0, 2000)) +
+  theme_minimal() +
+  theme_custom +
+  coord_fixed()  # Make the tiles square
+
+ggsave(width = 8, height = 14.5, filename = "/path/to/Asteralaes_NLR_freq.svg", dpi = "retina", device = "svg")
+
+
+# NRC percentage
+ggplot(NLR_freq_melted_Asterales_NRC, aes(y = Species, x = variable)) +
+  geom_tile(aes(fill = value), colour = "white", linejoin = "round") +
+  geom_text(aes(label = sprintf("%.1f", value)), size = 5) +
+  scale_fill_gradient(low = "white", high = "#e01e37", limits = c(0, 100)) +
+  theme_minimal() +
+  theme_custom +
+  coord_fixed()  # Make the tiles square
+
+ggsave(width = 8, height = 14.5, filename = "/path/to/Asteralaes_NRC_percentage_freq.svg", dpi = "retina", device = "svg")
+
+
+## Solanales
+# NLR
+ggplot(NLR_freq_melted_Solanales_NLR, aes(y = Species, x = variable)) +
+  geom_tile(aes(fill = value), colour = "white", linejoin = "round") +
+  geom_text(aes(label = sprintf("%d", value)), size = 4) +
+  scale_fill_gradient2(low = "white", mid = "#4361ee", high = "#b5179e", midpoint = 1000, limits = c(0, 2000)) +
+  theme_minimal() +
+  theme_custom +
+  coord_fixed()  # Make the tiles square
+
+ggsave(width = 8, height = 14.5, filename = "/path/to/Solanales_NLR_freq.svg", dpi = "retina", device = "svg")
+
+
+# NRC percentage
+ggplot(NLR_freq_melted_Solanales_NRC, aes(y = Species, x = variable)) +
+  geom_tile(aes(fill = value), colour = "white", linejoin = "round") +
+  geom_text(aes(label = sprintf("%.1f", value)), size = 5) +
+  scale_fill_gradient(low = "white", high = "#e01e37", limits = c(0, 100)) +
+  theme_minimal() +
+  theme_custom +
+  coord_fixed()  # Make the tiles square
+
+ggsave(width = 8, height = 14.5, filename = "/path/to/Solanales_NRC_percentage_freq.svg", dpi = "retina", device = "svg")
+
+```
+
+
+#### 16. Extract the Lactuca genus and subset the NRC superclade sequences for phylogenetic analysis:
+```{r}
+
+Lactuca_NLR <- Solanales_Asterales_NLR_filtered_deduplicated_len[Solanales_Asterales_NLR_filtered_deduplicated_len$Genus == "Lactuca",]
+
+Lactuca_seq <- all_ref[Lactuca_NLR$ID]
+Lactuca_NBARC_seq <- all_ref_NBARC[Lactuca_NLR$ID]
+
+
+Lactuca_NRC <- NRC_clade_metadata[NRC_clade_metadata$ID %in% Lactuca_NLR$ID,]
+
+Lactuca_NRC_NBARC <- Solanales_Asterales_NBARC_filtered_deduplicated_len[Solanales_Asterales_NBARC_filtered_deduplicated_len$seqname %in% Lactuca_NRC$seqname,]
+
+
+Lactuca_NRC_seq <- Lactuca_seq[Lactuca_NRC$ID]
+Lactuca_NRC_NBARC_seq <- Lactuca_NBARC_seq[Lactuca_NRC$ID]
+
+
+Lactuca_NRC_helper <- NRCH_clade_metadata[NRCH_clade_metadata$ID %in% Lactuca_NLR$ID,]
+Lactuca_NRC_helper_seq <- Lactuca_NRC_seq[Lactuca_NRC_helper$ID]
+
+
+Lactuca_NRC_sensor <- NRC_SD_clade_metadata[NRC_SD_clade_metadata$ID %in% Lactuca_NLR$ID,]
+Lactuca_NRC_sensor_seq <- Lactuca_NRC_seq[Lactuca_NRC_sensor$ID]
+
+
+# add the reference sequences and export for phylogenetic analysis
+Lactuca_NRC_seq_ref <- c(Lactuca_NRC_seq, ZAR1, NRC_ref)
+
+# export the full-length NRCs to generate the phylogenetic tree
+writeXStringSet(Lactuca_NRC_seq_ref, "/path/to/Lactuca_NRC_seq_ref.fasta")
+
+```
+
+#### 17. generate the phylogenetic tree of the NRC superclade in Lactuca genus:
+```{bash}
+mafft --anysymbol Lactuca_NRC_seq_ref.fasta > Lactuca_NRC_seq_ref.afa
+
+iqtree -s Lactuca_NRC_seq_ref.afa -B 1000 -m MFP
+
+# the "Lactuca_NRC_seq_ref.afa.treefile" output file is used for visualization
+
+```
+
+
+#### 18. Extract the lettuce NLRs and NRCs:
+```{r}
+# total NLRs
+Lsativa_NLR <- Solanales_Asterales_NLR_filtered_deduplicated_len[Solanales_Asterales_NLR_filtered_deduplicated_len$Species == "Lactuca sativa",]
+Lsativa_NBARC <- Solanales_Asterales_NBARC_filtered_deduplicated_len[Solanales_Asterales_NBARC_filtered_deduplicated_len$Species == "Lactuca sativa",]
+
+Lsativa_NLR_seq <- Solanales_Asterales_NLR_filtered_deduplicated_len_seq[Lsativa_NLR$ID]
+Lsativa_NBARC_seq <- Solanales_Asterales_NBARC_filtered_deduplicated_len_seq[Lsativa_NLR$ID]
+
+Lsativa_NBARC_seq_raw <- AAStringSet(Lsativa_NBARC$sequence)
+Lsativa_NBARC_seq_raw@ranges@NAMES <- Lsativa_NBARC$seqname
+
+# import the phylogenetic tree of L. sativa extracted from the
+Lsativa_NRC_tree <- read.tree("/path/to/Lsativa_NRC.newick")
+Lsativa_NRC_tree_ids <- Lsativa_NRC_tree$tip.label %>% as.data.frame() %>% setNames("ID")
+Lsativa_NRC_tree_ids <- Lsativa_NRC_tree_ids %>%
+  mutate(ID = gsub("'","",ID)) %>%
+  mutate(ID = gsub("\\.","_",ID))
+
+# import the functional nodes of the network
+Lsativa_NRC_functional_tree <- read.tree("/path/to/Lsative_NRC_network_functional.newick")
+Lsativa_NRC_functional_tree_ids <- Lsativa_NRC_functional_tree$tip.label %>% as.data.frame() %>% setNames("ID")
+Lsativa_NRC_functional_tree_ids <- Lsativa_NRC_functional_tree_ids %>%
+  mutate(ID = gsub("'","",ID)) %>%
+  mutate(ID = gsub("\\.","_",ID))
+
+
+# NRC clade
+Lsativa_NRC <- Lsativa_NLR[Lsativa_NLR$ID %in% NRC_clade_metadata$ID,] %>% arrange(ID)
+Lsativa_NRC_NBARC <- Lsativa_NBARC[Lsativa_NBARC$ID %in% NRC_clade_metadata$ID,]
+
+Lsativa_NRC_seq <- Lsativa_NLR_seq[Lsativa_NRC$ID]
+Lsativa_NRC_NBARC_seq <- Lactuca_NRC_NBARC_seq[Lsativa_NRC$ID]
+
+# extract the different regions for structural modelling
+Lsativa_NRC_CCNBARC <- subseq(Lsativa_NRC_seq, 1, Lsativa_NRC_NBARC$end)
+Lsativa_NRC_CC <- subseq(Lsativa_NRC_seq, 1, Lsativa_NRC_NBARC$start)
+
+```
+
+
+#### 19. Import the RGC families from Christopoulou et al., 2015 https://doi.org/10.1534/g3.116.027144
+```{r}
+# Define the file path
+blast_path <- "/path/to/suppelementary/Lsat_NLRome.out"
+
+# Read the file, skipping lines with '#'
+# First, read the entire file into a vector
+lines <- readLines(blast_path)
+
+# Filter out lines containing the '#' character
+filtered_lines <- lines[!grepl("#", lines)]
+
+# Convert the filtered lines to a temporary file for table import
+temp_file <- tempfile()
+writeLines(filtered_lines, temp_file)
+
+# Import the filtered lines as a table
+table <- read.table(temp_file, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+
+# Remove the temporary file
+unlink(temp_file)
+
+
+Lsat_blast_hits_filtered <- table[table$V3 > 98,]
+
+Lsat_blast_hits_filtered <- Lsat_blast_hits_filtered[Lsat_blast_hits_filtered$V12 > 1500,]
+
+Lsat_blast_hits_filtered_list <- Lsat_blast_hits_filtered[c(1,2)]
+
+
+
+# import the data from Christopoulou et al
+
+Christopoulou_metadata <- read_xlsx("/path/to/suppelementary/020818_tables2.xlsx")
+
+Christopoulou_metadata_filtered <- Christopoulou_metadata[Christopoulou_metadata$`new ID complete` %in% Lsat_blast_hits_filtered$V1,]
+
+RGC_families <- Christopoulou_metadata_filtered[,c("new ID complete","RGC family")] %>% na.omit()
+
+Lsat_blast_hits_filtered_list_merge <- Lsat_blast_hits_filtered_list %>% left_join(y = RGC_families, join_by(V1 == `new ID complete`)) %>% na.omit() %>% set_names(c("old ID","Helixer ID", "family"))
+
+
+# merge data with the lettuce NLRome
+Lsativa_NLR_RGC <- Lsativa_NLR %>% left_join(y = Lsat_blast_hits_filtered_list_merge, join_by(seqname == `Helixer ID`))
+
+# annotate the families
+Lsativa_NLR_RGC_annot <- Lsativa_NLR_RGC[,c(1,18,19,20)] %>% na.omit()
+
+Lsativa_NLR_RGC_annot <- Lsativa_NLR_RGC_annot %>% mutate(color = case_when(
+  family == "RGC7" ~ "#F16978",
+  family == "RGC26" ~ "#042626",
+  family == "RGC27" ~ "#65894E",
+  family == "RGC9" ~ "#93C572"
+))
+
+```
+
