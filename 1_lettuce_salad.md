@@ -1,4 +1,6 @@
+![R](https://img.shields.io/badge/r-4.4.2-blue.svg)
 ```{r}
+# require packages
 library(tidyverse)
 library(readxl)
 library(Biostrings)
