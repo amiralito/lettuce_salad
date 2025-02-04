@@ -1,6 +1,6 @@
 # Supporting scripts and material for "A hierarchical immune receptor network in lettuce reveals contrasting patterns of evolution in sensor and helper NLRs"
 
-Hsuan Pai, Toshiyuki Sakai, Andres Posbeyikian, Raoul Frijters, Hiroaki Adachi, Sophien Kamoun*, AmirAli Toghani*
+Hsuan Pai, Toshiyuki Sakai, Andres Posbeyikian, Raoul Frijters, Hiroaki Adachi, Sophien Kamoun, AmirAli Toghani
 
 
 Resources:
