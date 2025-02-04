@@ -1,4 +1,12 @@
-![R](https://img.shields.io/badge/r-4.4.2-blue.svg)
+---
+title: "1_lettuce_salad"
+author: "AmirAli Toghani"
+date: "2025-02-04"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
 ```{r}
 # require packages
 library(tidyverse)
