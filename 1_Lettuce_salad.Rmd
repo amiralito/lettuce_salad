@@ -1,5 +1,5 @@
 ---
-title: "1_lettuce_salad"
+title: "1_Lettuce_salad"
 author: "AmirAli Toghani"
 date: "2025-02-04"
 output: html_document
