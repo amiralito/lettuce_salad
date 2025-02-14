@@ -1,0 +1,453 @@
+---
+title: "3_Asterales_genetics"
+author: "AmirAli Toghani"
+date: "2025-02-12"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(Biostrings)
+library(ggtree)
+library(pheatmap)
+library(reshape2)
+library(svglite)
+library(GenomicRanges)
+library(GenomicFeatures)
+library(rtracklayer)
+```
+
+#### 1. Extract the NRCs for each species:
+```{r}
+# Helianthus annuus
+Hannuus_NRC <- NRC_clade_metadata[NRC_clade_metadata$Species == "Helianthus annuus",]
+Hannuus_NRC_seq <- AAStringSet(Hannuus_NRC$sequence)
+Hannuus_NRC_seq@ranges@NAMES <- Hannuus_NRC$ID
+
+Hannuus_NRC0 <- NRC0_clade_metadata[NRC0_clade_metadata$Species == "Helianthus annuus",]
+Hannuus_NRCH_other <- NRCH_other_clade_metadata[NRCH_other_clade_metadata$Species == "Helianthus annuus",]
+Hannuus_NRCS <- NRC_SD_clade_metadata[NRC_SD_clade_metadata$Species == "Helianthus annuus",]
+
+# Cichorium intybus
+Cintybus_NRC <- NRC_clade_metadata[NRC_clade_metadata$Species == "Cichorium intybus",]
+Cintybus_NRC_seq <- AAStringSet(Cintybus_NRC$sequence)
+Cintybus_NRC_seq@ranges@NAMES <- Cintybus_NRC$ID
+
+Cintybus_NRC0 <- NRC0_clade_metadata[NRC0_clade_metadata$Species == "Cichorium intybus",]
+Cintybus_NRCH_other <- NRCH_other_clade_metadata[NRCH_other_clade_metadata$Species == "Cichorium intybus",]
+Cintybus_NRCS <- NRC_SD_clade_metadata[NRC_SD_clade_metadata$Species == "Cichorium intybus",]
+
+# Cynara cardunculus
+Ccardunculus_NRC <- NRC_clade_metadata[NRC_clade_metadata$Species == "Cynara cardunculus",]
+Ccardunculus_NRC_seq <- AAStringSet(Ccardunculus_NRC$sequence)
+Ccardunculus_NRC_seq@ranges@NAMES <- Ccardunculus_NRC$ID
+
+Ccardunculus_NRC0 <- NRC0_clade_metadata[NRC0_clade_metadata$Species == "Cynara cardunculus",]
+Ccardunculus_NRCH_other <- NRCH_other_clade_metadata[NRCH_other_clade_metadata$Species == "Cynara cardunculus",]
+Ccardunculus_NRCS <- NRC_SD_clade_metadata[NRC_SD_clade_metadata$Species == "Cynara cardunculus",]
+
+# Chrysanthemum lavandulifolium
+Clavandulifolium_NRC <- NRC_clade_metadata[NRC_clade_metadata$Species == "Chrysanthemum lavandulifolium",]
+Clavandulifolium_NRC_seq <- AAStringSet(Clavandulifolium_NRC$sequence)
+Clavandulifolium_NRC_seq@ranges@NAMES <- Clavandulifolium_NRC$ID
+
+Clavandulifolium_NRC0 <- NRC0_clade_metadata[NRC0_clade_metadata$Species == "Chrysanthemum lavandulifolium",]
+Clavandulifolium_NRCH_other <- NRCH_other_clade_metadata[NRCH_other_clade_metadata$Species == "Chrysanthemum lavandulifolium",]
+Clavandulifolium_NRCS <- NRC_SD_clade_metadata[NRC_SD_clade_metadata$Species == "Chrysanthemum lavandulifolium",]
+
+# Codonopsis lanceolata
+Clanceolata_NRC <- NRC_clade_metadata[NRC_clade_metadata$Species == "Codonopsis lanceolata",]
+Clanceolata_NRC_seq <- AAStringSet(Clanceolata_NRC$sequence)
+Clanceolata_NRC_seq@ranges@NAMES <- Clanceolata_NRC$ID
+
+Clanceolata_NRC0 <- NRC0_clade_metadata[NRC0_clade_metadata$Species == "Codonopsis lanceolata",]
+Clanceolata_NRCH_other <- NRCH_other_clade_metadata[NRCH_other_clade_metadata$Species == "Codonopsis lanceolata",]
+Clanceolata_NRCS <- NRC_SD_clade_metadata[NRC_SD_clade_metadata$Species == "Codonopsis lanceolata",]
+
+
+# merge and export the other Asterales NRCs for phylogenetic analysis
+c(Hannuus_NRC_seq, Cintybus_NRC_seq, Ccardunculus_NRC_seq, Clavandulifolium_NRC_seq, Clanceolata_NRC_seq, Lactuca_NRC_seq, ZAR1, NRC_ref) %>% writeXStringSet("/path/to/Astreales_lactuca_ref.fasta")
+
+Asterales_select_NRC_meta <- do.call(rbind, list(Hannuus_NRC, Cintybus_NRC, Ccardunculus_NRC, Clanceolata_NRC, Clavandulifolium_NRC, Lactuca_NRC))
+write_csv(Asterales_select_NRC_meta, "/path/to/Asterales_select_NRC.csv")
+
+Asterales_select_NRC_meta <- Asterales_select_NRC_meta %>% mutate(color = case_when(
+  Species == "Helianthus annuus" ~ "#F0F3BF",
+  Species == "Cichorium intybus" ~ "#A8D59C",
+  Species == "Cynara cardunculus" ~ "#BA4126",
+  Species == "Chrysanthemum lavandulifolium" ~ "#ED9C21",
+  Species == "Codonopsis lanceolata" ~ "#8253A2",
+  Species == "Lactuca sativa" ~ "#1C3557",
+  Species == "Lactuca saligna" ~ "#1DA1B7",
+  Species == "Lactuca virosa" ~ "#BBE0DD"
+))
+
+
+Asterales_select_NRC_annot <- Asterales_select_NRC_meta[,c(18, 19, 17)]
+write_csv(Asterales_select_NRC_annot, "/path/to/iTOL_annto.csv")
+```
+
+
+#### 2. Function to extract the chromosome lengths:
+
+```{r}
+
+# Define the function
+extract_chrom_lengths <- function(gff_file_path) {
+  # Import GFF data
+  gff_data <- import.gff(gff_file_path)
+  
+  # Calculate the max end position for each chromosome
+  seqnames <- seqnames(gff_data)
+  end_positions <- end(gff_data)
+  chrom_lengths <- tapply(end_positions, seqnames, max)
+  
+  # Create the dataframe
+  chrom_length_df <- as.data.frame(chrom_lengths, stringsAsFactors = FALSE)
+  names(chrom_length_df) <- c("Length")
+  chrom_length_df$Chromosome <- rownames(chrom_length_df)
+  
+  # Create the final dataframe
+  chromosomes_df <- data_frame(Chr_id = chrom_length_df$Chromosome, length = chrom_length_df$Length)
+  
+  return(chromosomes_df)
+}
+
+# Example usage:
+# Replace 'your_gff_file_path' with the actual path to your GFF file
+# result_df <- extract_chrom_lengths("your_gff_file_path")
+# print(result_df)
+
+```
+
+#### 3. Extract the chromosome length and info for the other Asterales species:
+
+```{r}
+Hannuus_chr_len <- extract_chrom_lengths("/path/to/gff/Hannuus_simple.gff")
+Cintybus_chr_len <- extract_chrom_lengths("/path/to/gff/Cintybus_simple.gff")
+Ccardunculus_chr_len <- extract_chrom_lengths("/path/to/gff/Ccardunculus_simple.gff")
+Clavandulifolium_chr_len <- extract_chrom_lengths("/path/to/gff/Clavandulifolium_simple.gff")
+Clanceolata_chr_len <- extract_chrom_lengths("/path/to/gff/Clanceolata_simple.gff")
+
+# Helianthus annuus chromosome info prep
+Hannuus_chr <- data.frame(chr = paste0("Chr",c(1:17)),
+                           id = c("NC_035433.2",
+                                  "NC_035434.2",
+                                  "NC_035435.2",
+                                  "NC_035436.2",
+                                  "NC_035437.2",
+                                  "NC_035438.2",
+                                  "NC_035439.2",
+                                  "NC_035440.2",
+                                  "NC_035441.2",
+                                  "NC_035442.2",
+                                  "NC_035443.2",
+                                  "NC_035444.2",
+                                  "NC_035445.2",
+                                  "NC_035446.2",
+                                  "NC_035447.2",
+                                  "NC_035448.2",
+                                  "NC_035449.2"))
+
+Hannuus_chr_info <- Hannuus_chr %>% left_join(Hannuus_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Hannuus_chr_info[,c(1,3)], "/path/to/Hannuus_chr.tsv")
+
+
+
+# Cichorium intybus chromosome info prep
+Cintybus_chr <- data.frame(chr = paste0("Chr",c(1:9)),
+                           id = c("CM042009.1",
+                                  "CM042010.1",
+                                  "CM042011.1",
+                                  "CM042012.1",
+                                  "CM042013.1",
+                                  "CM042014.1",
+                                  "CM042015.1",
+                                  "CM042016.1",
+                                  "CM042017.1"))
+
+Cintybus_chr_info <- Cintybus_chr %>% left_join(Cintybus_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Cintybus_chr_info[,c(1,3)], "/path/to/Cintybus_chr.tsv")
+
+
+
+# Cynara cardunculus
+Ccardunculus_chr <- data.frame(chr = c(paste0("Chr",c(1:17)), "Contig_NW_020200580.1"),
+                           id = c("NC_037528.1",
+                                  "NC_037529.1",
+                                  "NC_037530.1",
+                                  "NC_037531.1",
+                                  "NC_037532.1",
+                                  "NC_037533.1",
+                                  "NC_037534.1",
+                                  "NC_037535.1",
+                                  "NC_037536.1",
+                                  "NC_037537.1",
+                                  "NC_037538.1",
+                                  "NC_037539.1",
+                                  "NC_037540.1",
+                                  "NC_037541.1",
+                                  "NC_037542.1",
+                                  "NC_037543.1",
+                                  "NC_037544.1",
+                                  "NW_020200580.1"))
+
+Ccardunculus_chr_info <- Ccardunculus_chr %>% left_join(Ccardunculus_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Ccardunculus_chr_info[,c(1,3)], "/path/to/Ccardunculus_chr.tsv")
+
+
+
+# Chrysanthemum lavandulifolium chromosome info prep
+Clavandulifolium_chr <- data.frame(chr = paste0("Chr",c(1:9)),
+                           id = c("CM040238.1",
+                                  "CM040239.1",
+                                  "CM040240.1",
+                                  "CM040241.1",
+                                  "CM040242.1",
+                                  "CM040243.1",
+                                  "CM040244.1",
+                                  "CM040245.1",
+                                  "CM040246.1"))
+
+Clavandulifolium_chr_info <- Clavandulifolium_chr %>% left_join(Clavandulifolium_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Clavandulifolium_chr_info[,c(1,3)], "/path/to/Clavandulifolium_chr.tsv")
+
+
+
+# Codonopsis lanceolata chromosome info prep
+Clanceolata_chr <- data.frame(chr = c((paste0("Chr",c(1:8))), "Contig_JABEVN020000034.1"),
+                           id = c("CM028377.1",
+                                  "CM028378.1",
+                                  "CM028379.1",
+                                  "CM028380.1",
+                                  "CM028381.1",
+                                  "CM028382.1",
+                                  "CM028383.1",
+                                  "CM028384.1",
+                                  "JABEVN020000034.1"))
+
+Clanceolata_chr_info <- Clanceolata_chr %>% left_join(Clanceolata_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Clanceolata_chr_info[,c(1,3)], "/path/to/Clanceolata_chr.tsv")
+
+```
+
+
+#### 4. Function to extract the NRC clade physical coordinates:
+
+```{r}
+gene_coordinates <- function(gff_file_path, gene_ids) {
+  # Import the GFF file as a GRanges object
+  granges_gff <- import(gff_file_path, format = "GFF")
+  
+  # Subset GRanges object to include only the genes in the gene list
+  # Assuming the 'ID' metadata column in the GFF contains the gene identifiers
+  gene_positions <- granges_gff[granges_gff$ID %in% gene_ids]
+  
+  # Create a data frame for plotting
+  gene_info <- data.frame(chr_id = seqnames(gene_positions),
+                          start = start(gene_positions),
+                          end = end(gene_positions),
+                          gene = gene_positions$ID)  # Assuming 'ID' is the correct metadata field for gene identifiers
+  
+  # Return the final dataframe
+  return(gene_info)
+}
+```
+
+#### 5. Extract the NRC clade physical coordinates:
+
+```{r}
+Hannuus_NRC_coord <- gene_coordinates("/path/to/gff/Hannuus_simple.gff", Hannuus_NRC$seqname)
+Cintybus_NRC_coord <- gene_coordinates("/path/to/gff/Cintybus_simple.gff", Cintybus_NRC$seqname)
+Ccardunculus_NRC_coord <- gene_coordinates("/path/to/gff/Ccardunculus_simple.gff", Ccardunculus_NRC$seqname)
+Clavandulifolium_NRC_coord <- gene_coordinates("/path/to/gff/Clavandulifolium_simple.gff", Clavandulifolium_NRC$seqname)
+Clanceolata_NRC_coord <- gene_coordinates("/path/to/gff/Clanceolata_simple.gff", Clanceolata_NRC$seqname)
+
+
+# merge the gene coordinates with chr information
+
+Hannuus_NRC_coord_info <- Hannuus_NRC_coord %>% left_join(Hannuus_chr_info, by = c("chr_id" = "id"))
+Cintybus_NRC_coord_info <- Cintybus_NRC_coord %>% left_join(Cintybus_chr_info, by = c("chr_id" = "id"))
+Ccardunculus_NRC_coord_info <- Ccardunculus_NRC_coord %>% left_join(Ccardunculus_chr_info, by = c("chr_id" = "id"))
+Clavandulifolium_NRC_coord_info <- Clavandulifolium_NRC_coord %>% left_join(Clavandulifolium_chr_info, by = c("chr_id" = "id"))
+Clanceolata_NRC_coord_info <- Clanceolata_NRC_coord %>% left_join(Clanceolata_chr_info, by = c("chr_id" = "id"))
+
+
+# export the coord data
+write_delim(Hannuus_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Hannuus_NRC_coord.txt")
+write_delim(Cintybus_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Cintybus_NRC_coord.txt")
+write_delim(Ccardunculus_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Ccardunculus_NRC_coord.txt")
+write_delim(Clavandulifolium_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Clavandulifolium_NRC_coord.txt")
+write_delim(Clanceolata_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Clanceolata_NRC_coord.txt")
+
+
+```
+
+
+
+#### 6. Now calculate the gene distances:
+
+Calculate the paired gene distances for Helianthus annuus:
+
+```{r}
+# Sort genes by chromosome and start position
+Hannuus_NRC_coord_info <- Hannuus_NRC_coord_info[order(Hannuus_NRC_coord_info$chr, Hannuus_NRC_coord_info$start), ]
+Hannuus_NRC_coord_info <- Hannuus_NRC_coord_info %>% left_join(Hannuus_NRC[,c(1,18)], by = c("gene" = "seqname"))
+
+# Ensure the matrix is initialized correctly
+Hannuus_NRC_distance_matrix <- matrix(NA, nrow = nrow(Hannuus_NRC_coord_info), ncol = nrow(Hannuus_NRC_coord_info))
+rownames(Hannuus_NRC_distance_matrix) <- Hannuus_NRC_coord_info$ID
+colnames(Hannuus_NRC_distance_matrix) <- Hannuus_NRC_coord_info$ID
+
+# Calculate distances
+# Loop to calculate distances
+for (i in 1:(nrow(Hannuus_NRC_coord_info) - 1)) { # Adjusted to avoid going out of bounds
+  for (j in (i + 1):nrow(Hannuus_NRC_coord_info)) {
+    if (!is.na(Hannuus_NRC_coord_info$chr[i]) && !is.na(Hannuus_NRC_coord_info$chr[j])) {
+      if (Hannuus_NRC_coord_info$chr[i] == Hannuus_NRC_coord_info$chr[j]) {
+        # Calculate distance only if genes are on the same chromosome
+        distance <- Hannuus_NRC_coord_info$start[j] - Hannuus_NRC_coord_info$end[i]
+        Hannuus_NRC_distance_matrix[i, j] <- distance
+        Hannuus_NRC_distance_matrix[j, i] <- distance # Ensure the matrix is symmetric
+      }
+    }
+  }
+}
+
+
+# convert it into a dataframe
+Hannuus_NRC_distance_values <- as.vector(Hannuus_NRC_distance_matrix)
+Hannuus_NRC_gene_pairs <- expand.grid(rownames(Hannuus_NRC_distance_matrix), colnames(Hannuus_NRC_distance_matrix))
+Hannuus_NRC_distance_df <- data_frame(gene1 = Hannuus_NRC_gene_pairs$Var1, gene2 = Hannuus_NRC_gene_pairs$Var2, distance = Hannuus_NRC_distance_values)
+
+# remove redundant combinations
+Hannuus_NRC_distance_df$PairID <- apply(Hannuus_NRC_distance_df[, 1:2], 1, function(x) paste(sort(x), collapse = "_"))
+Hannuus_NRC_distance_df <- Hannuus_NRC_distance_df[!duplicated(Hannuus_NRC_distance_df$PairID), ]
+Hannuus_NRC_distance_df$PairID <- NULL
+
+# remove the ones on different choromosomes and self comaprisons
+Hannuus_NRC_distance_df <- subset(Hannuus_NRC_distance_df, !is.na(Hannuus_NRC_distance_df$distance))
+Hannuus_NRC_distance_df <- subset(Hannuus_NRC_distance_df, gene1 != gene2)
+
+# transform the distances for plotting
+Hannuus_NRC_distance_df$`normalized distance` <- 1/log(Hannuus_NRC_distance_df$distance) * 100
+
+# remove the entries with distance higher than 0.5 Mb
+Hannuus_NRC_distance_df_filtered <- Hannuus_NRC_distance_df[Hannuus_NRC_distance_df$distance < 100000,]
+
+Hannuus_NRC_distance_df_filtered$color <- "#F0F3BF"
+
+write_csv(Hannuus_NRC_distance_df_filtered, "/path/to/paired_distance/Hannuus_NRC_distance.csv")
+```
+
+
+#### 7. Calculate the paired gene distances for Cichorium intybus:
+
+```{r}
+# Sort genes by chromosome and start position
+Cintybus_NRC_coord_info <- Cintybus_NRC_coord_info[order(Cintybus_NRC_coord_info$chr, Cintybus_NRC_coord_info$start), ]
+Cintybus_NRC_coord_info <- Cintybus_NRC_coord_info %>% left_join(Cintybus_NRC[,c(1,18)], by = c("gene" = "seqname"))
+
+# Ensure the matrix is initialized correctly
+Cintybus_NRC_distance_matrix <- matrix(NA, nrow = nrow(Cintybus_NRC_coord_info), ncol = nrow(Cintybus_NRC_coord_info))
+rownames(Cintybus_NRC_distance_matrix) <- Cintybus_NRC_coord_info$ID
+colnames(Cintybus_NRC_distance_matrix) <- Cintybus_NRC_coord_info$ID
+
+# Calculate distances
+# Loop to calculate distances
+for (i in 1:(nrow(Cintybus_NRC_coord_info) - 1)) { # Adjusted to avoid going out of bounds
+  for (j in (i + 1):nrow(Cintybus_NRC_coord_info)) {
+    if (!is.na(Cintybus_NRC_coord_info$chr[i]) && !is.na(Cintybus_NRC_coord_info$chr[j])) {
+      if (Cintybus_NRC_coord_info$chr[i] == Cintybus_NRC_coord_info$chr[j]) {
+        # Calculate distance only if genes are on the same chromosome
+        distance <- Cintybus_NRC_coord_info$start[j] - Cintybus_NRC_coord_info$end[i]
+        Cintybus_NRC_distance_matrix[i, j] <- distance
+        Cintybus_NRC_distance_matrix[j, i] <- distance # Ensure the matrix is symmetric
+      }
+    }
+  }
+}
+
+
+# convert it into a dataframe
+Cintybus_NRC_distance_values <- as.vector(Cintybus_NRC_distance_matrix)
+Cintybus_NRC_gene_pairs <- expand.grid(rownames(Cintybus_NRC_distance_matrix), colnames(Cintybus_NRC_distance_matrix))
+Cintybus_NRC_distance_df <- data_frame(gene1 = Cintybus_NRC_gene_pairs$Var1, gene2 = Cintybus_NRC_gene_pairs$Var2, distance = Cintybus_NRC_distance_values)
+
+# remove redundant combinations
+Cintybus_NRC_distance_df$PairID <- apply(Cintybus_NRC_distance_df[, 1:2], 1, function(x) paste(sort(x), collapse = "_"))
+Cintybus_NRC_distance_df <- Cintybus_NRC_distance_df[!duplicated(Cintybus_NRC_distance_df$PairID), ]
+Cintybus_NRC_distance_df$PairID <- NULL
+
+# remove the ones on different choromosomes and self comaprisons
+Cintybus_NRC_distance_df <- subset(Cintybus_NRC_distance_df, !is.na(Cintybus_NRC_distance_df$distance))
+Cintybus_NRC_distance_df <- subset(Cintybus_NRC_distance_df, gene1 != gene2)
+
+# transform the distances for plotting
+Cintybus_NRC_distance_df$`normalized distance` <- 1/log(Cintybus_NRC_distance_df$distance) * 100
+
+# remove the entries with distance higher than 0.5 Mb
+Cintybus_NRC_distance_df_filtered <- Cintybus_NRC_distance_df[Cintybus_NRC_distance_df$distance < 100000,]
+
+Cintybus_NRC_distance_df_filtered$color <- "#F0F3BF"
+
+write_csv(Cintybus_NRC_distance_df_filtered, "/path/to/paired_distance/Cintybus_NRC_distance.csv")
+```
+
+
+#### 8. Calculate the paired gene distances for Cynara cardunculus:
+
+```{r}
+# Sort genes by chromosome and start position
+Ccardunculus_NRC_coord_info <- Ccardunculus_NRC_coord_info[order(Ccardunculus_NRC_coord_info$chr, Ccardunculus_NRC_coord_info$start), ]
+Ccardunculus_NRC_coord_info <- Ccardunculus_NRC_coord_info %>% left_join(Ccardunculus_NRC[,c(1,18)], by = c("gene" = "seqname"))
+
+# Ensure the matrix is initialized correctly
+Ccardunculus_NRC_distance_matrix <- matrix(NA, nrow = nrow(Ccardunculus_NRC_coord_info), ncol = nrow(Ccardunculus_NRC_coord_info))
+rownames(Ccardunculus_NRC_distance_matrix) <- Ccardunculus_NRC_coord_info$ID
+colnames(Ccardunculus_NRC_distance_matrix) <- Ccardunculus_NRC_coord_info$ID
+
+# Calculate distances
+# Loop to calculate distances
+for (i in 1:(nrow(Ccardunculus_NRC_coord_info) - 1)) { # Adjusted to avoid going out of bounds
+  for (j in (i + 1):nrow(Ccardunculus_NRC_coord_info)) {
+    if (!is.na(Ccardunculus_NRC_coord_info$chr[i]) && !is.na(Ccardunculus_NRC_coord_info$chr[j])) {
+      if (Ccardunculus_NRC_coord_info$chr[i] == Ccardunculus_NRC_coord_info$chr[j]) {
+        # Calculate distance only if genes are on the same chromosome
+        distance <- Ccardunculus_NRC_coord_info$start[j] - Ccardunculus_NRC_coord_info$end[i]
+        Ccardunculus_NRC_distance_matrix[i, j] <- distance
+        Ccardunculus_NRC_distance_matrix[j, i] <- distance # Ensure the matrix is symmetric
+      }
+    }
+  }
+}
+
+
+# convert it into a dataframe
+Ccardunculus_NRC_distance_values <- as.vector(Ccardunculus_NRC_distance_matrix)
+Ccardunculus_NRC_gene_pairs <- expand.grid(rownames(Ccardunculus_NRC_distance_matrix), colnames(Ccardunculus_NRC_distance_matrix))
+Ccardunculus_NRC_distance_df <- data_frame(gene1 = Ccardunculus_NRC_gene_pairs$Var1, gene2 = Ccardunculus_NRC_gene_pairs$Var2, distance = Ccardunculus_NRC_distance_values)
+
+# remove redundant combinations
+Ccardunculus_NRC_distance_df$PairID <- apply(Ccardunculus_NRC_distance_df[, 1:2], 1, function(x) paste(sort(x), collapse = "_"))
+Ccardunculus_NRC_distance_df <- Ccardunculus_NRC_distance_df[!duplicated(Ccardunculus_NRC_distance_df$PairID), ]
+Ccardunculus_NRC_distance_df$PairID <- NULL
+
+# remove the ones on different choromosomes and self comaprisons
+Ccardunculus_NRC_distance_df <- subset(Ccardunculus_NRC_distance_df, !is.na(Ccardunculus_NRC_distance_df$distance))
+Ccardunculus_NRC_distance_df <- subset(Ccardunculus_NRC_distance_df, gene1 != gene2)
+
+# transform the distances for plotting
+Ccardunculus_NRC_distance_df$`normalized distance` <- 1/log(Ccardunculus_NRC_distance_df$distance) * 100
+
+# remove the entries with distance higher than 0.5 Mb
+Ccardunculus_NRC_distance_df_filtered <- Ccardunculus_NRC_distance_df[Ccardunculus_NRC_distance_df$distance < 100000,]
+
+Ccardunculus_NRC_distance_df_filtered$color <- "#F0F3BF"
+
+write_csv(Ccardunculus_NRC_distance_df_filtered, "/path/to/paired_distance/Ccardunculus_NRC_distance.csv")
+```
+

@@ -1,0 +1,330 @@
+---
+title: "2_Lactuca_genetics"
+author: "AmirAli Toghani"
+date: "2025-02-12"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(Biostrings)
+library(ggtree)
+library(pheatmap)
+library(reshape2)
+library(svglite)
+library(GenomicRanges)
+library(GenomicFeatures)
+library(rtracklayer)
+```
+
+#### 1. Function to extract the chromosome lengths:
+
+```{r}
+
+# Define the function
+extract_chrom_lengths <- function(gff_file_path) {
+  # Import GFF data
+  gff_data <- import.gff(gff_file_path)
+  
+  # Calculate the max end position for each chromosome
+  seqnames <- seqnames(gff_data)
+  end_positions <- end(gff_data)
+  chrom_lengths <- tapply(end_positions, seqnames, max)
+  
+  # Create the dataframe
+  chrom_length_df <- as.data.frame(chrom_lengths, stringsAsFactors = FALSE)
+  names(chrom_length_df) <- c("Length")
+  chrom_length_df$Chromosome <- rownames(chrom_length_df)
+  
+  # Create the final dataframe
+  chromosomes_df <- data_frame(Chr_id = chrom_length_df$Chromosome, length = chrom_length_df$Length)
+  
+  return(chromosomes_df)
+}
+
+# Example usage:
+# Replace 'your_gff_file_path' with the actual path to your GFF file
+# result_df <- extract_chrom_lengths("your_gff_file_path")
+# print(result_df)
+
+```
+
+
+#### 2. Extract the chromosome length and info for Lactuca species:
+
+```{r}
+Lsativa_chr_len <- extract_chrom_lengths("/path/to/gff/Lsativa_simple.gff")
+Lvirosa_chr_len <- extract_chrom_lengths("/path/to/gff/Lvirosa_simple.gff")
+Lsaligna_chr_len <- extract_chrom_lengths("/path/to/gff/Lsaligna_simple.gff")
+
+# Lactuca sativa chromosome info prep
+Lsativa_chr <- data.frame(chr = paste0("Chr",c(1:9)),
+                           id = c("NC_056623.2",
+                                  "NC_056624.2",
+                                  "NC_056625.2",
+                                  "NC_056626.2",
+                                  "NC_056627.2",
+                                  "NC_056628.2",
+                                  "NC_056629.2",
+                                  "NC_056630.2",
+                                  "NC_056631.2"))
+
+Lsativa_chr_info <- Lsativa_chr %>% left_join(Lsativa_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Lsativa_chr_info[,c(1,3)], "/path/to/Lsativa_chr.tsv")
+
+
+
+# Lactuca virosa chromosome info prep
+Lvirosa_chr <- data.frame(chr = paste0("Contig",row_number(Lvirosa_chr_len)),
+                           id = Lvirosa_chr_len$Chr_id)
+
+Lvirosa_chr_info <- Lvirosa_chr %>% left_join(Lvirosa_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Lvirosa_chr_info[,c(1,3)], "/path/to/Lvirosa_chr.tsv")
+
+
+
+# Lactuca sativa chromosome info prep
+Lsaligna_chr <- data.frame(chr = paste0("Chr",c(1:9,0)),
+                           id = c("OX465077.1",
+                                  "OX465078.1",
+                                  "OX465079.1",
+                                  "OX465080.1",
+                                  "OX465081.1",
+                                  "OX465082.1",
+                                  "OX465083.1",
+                                  "OX465084.1",
+                                  "OX465085.1",
+                                  "OX465086.1"))
+
+Lsaligna_chr_info <- Lsaligna_chr %>% left_join(Lsaligna_chr_len, by = c("id" = "Chr_id"))
+write_tsv(Lsaligna_chr_info[,c(1,3)], "/path/to/Lsaligna_chr.tsv")
+
+```
+
+#### 3. Function to extract the NRC clade physical coordinates:
+
+```{r}
+gene_coordinates <- function(gff_file_path, gene_ids) {
+  # Import the GFF file as a GRanges object
+  granges_gff <- import(gff_file_path, format = "GFF")
+  
+  # Subset GRanges object to include only the genes in the gene list
+  # Assuming the 'ID' metadata column in the GFF contains the gene identifiers
+  gene_positions <- granges_gff[granges_gff$ID %in% gene_ids]
+  
+  # Create a data frame for plotting
+  gene_info <- data.frame(chr_id = seqnames(gene_positions),
+                          start = start(gene_positions),
+                          end = end(gene_positions),
+                          gene = gene_positions$ID)  # Assuming 'ID' is the correct metadata field for gene identifiers
+  
+  # Return the final dataframe
+  return(gene_info)
+}
+```
+
+
+#### 4. Extract the NRC clade physical coordinates:
+
+```{r}
+Lsativa_NRC_coord <- gene_coordinates("/path/to/gff/Lsativa_simple.gff", Lsativa_NRC$seqname)
+Lsaligna_NRC_coord <- gene_coordinates("/path/to/gff/Lsaligna_simple.gff", Lsaligna_NRC$seqname)
+Lvirosa_NRC_coord <- gene_coordinates("/path/to/gff/Lvirosa_simple.gff", Lvirosa_NRC$seqname)
+
+# merge the gene coordinates with chr information
+
+Lsativa_NRC_coord_info <- Lsativa_NRC_coord %>% left_join(Lsativa_chr_info, by = c("chr_id" = "id"))
+Lsaligna_NRC_coord_info <- Lsaligna_NRC_coord %>% left_join(Lsaligna_chr_info, by = c("chr_id" = "id"))
+Lvirosa_NRC_coord_info <- Lvirosa_NRC_coord %>% left_join(Lvirosa_chr_info, by = c("chr_id" = "id"))
+
+
+# export the coord data
+write_delim(Lsativa_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Lsativa_NRC_coord.txt")
+write_delim(Lsaligna_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Lsaligna_NRC_coord.txt")
+write_delim(Lvirosa_NRC_coord_info[,c(4,2,3,5)],delim = " " ,"/path/to/Lvirosa_NRC_coord.txt")
+
+```
+
+#### 5. Calculate the paired gene distances for Lactuca sativa:
+
+```{r}
+# Sort genes by chromosome and start position
+Lsativa_NRC_coord_info <- Lsativa_NRC_coord_info[order(Lsativa_NRC_coord_info$chr, Lsativa_NRC_coord_info$start), ]
+Lsativa_NRC_coord_info <- Lsativa_NRC_coord_info %>% left_join(Lsativa_NRC[,c(1,18)], by = c("gene" = "seqname"))
+
+# Ensure the matrix is initialized correctly
+Lsativa_NRC_distance_matrix <- matrix(NA, nrow = nrow(Lsativa_NRC_coord_info), ncol = nrow(Lsativa_NRC_coord_info))
+rownames(Lsativa_NRC_distance_matrix) <- Lsativa_NRC_coord_info$ID
+colnames(Lsativa_NRC_distance_matrix) <- Lsativa_NRC_coord_info$ID
+
+# Calculate distances
+# Loop to calculate distances
+for (i in 1:(nrow(Lsativa_NRC_coord_info) - 1)) { # Adjusted to avoid going out of bounds
+  for (j in (i + 1):nrow(Lsativa_NRC_coord_info)) {
+    if (!is.na(Lsativa_NRC_coord_info$chr[i]) && !is.na(Lsativa_NRC_coord_info$chr[j])) {
+      if (Lsativa_NRC_coord_info$chr[i] == Lsativa_NRC_coord_info$chr[j]) {
+        # Calculate distance only if genes are on the same chromosome
+        distance <- Lsativa_NRC_coord_info$start[j] - Lsativa_NRC_coord_info$end[i]
+        Lsativa_NRC_distance_matrix[i, j] <- distance
+        Lsativa_NRC_distance_matrix[j, i] <- distance # Ensure the matrix is symmetric
+      }
+    }
+  }
+}
+
+
+# convert it into a dataframe
+Lsativa_NRC_distance_values <- as.vector(Lsativa_NRC_distance_matrix)
+Lsativa_NRC_gene_pairs <- expand.grid(rownames(Lsativa_NRC_distance_matrix), colnames(Lsativa_NRC_distance_matrix))
+Lsativa_NRC_distance_df <- data_frame(gene1 = Lsativa_NRC_gene_pairs$Var1, gene2 = Lsativa_NRC_gene_pairs$Var2, distance = Lsativa_NRC_distance_values)
+
+# remove redundant combinations
+Lsativa_NRC_distance_df$PairID <- apply(Lsativa_NRC_distance_df[, 1:2], 1, function(x) paste(sort(x), collapse = "_"))
+Lsativa_NRC_distance_df <- Lsativa_NRC_distance_df[!duplicated(Lsativa_NRC_distance_df$PairID), ]
+Lsativa_NRC_distance_df$PairID <- NULL
+
+# remove the ones on different choromosomes and self comaprisons
+Lsativa_NRC_distance_df <- subset(Lsativa_NRC_distance_df, !is.na(Lsativa_NRC_distance_df$distance))
+Lsativa_NRC_distance_df <- subset(Lsativa_NRC_distance_df, gene1 != gene2)
+
+# transform the distances for plotting
+Lsativa_NRC_distance_df$`normalized distance` <- 1/log(Lsativa_NRC_distance_df$distance) * 100
+
+# remove the entries with distance higher than 0.5 Mb
+Lsativa_NRC_distance_df_filtered <- Lsativa_NRC_distance_df[Lsativa_NRC_distance_df$distance < 100000,]
+
+Lsativa_NRC_distance_df_filtered$color <- "#1C3557"
+
+write_csv(Lsativa_NRC_distance_df_filtered, "/path/to/paired_distance/Lsativa_NRC_distance.csv")
+```
+
+#### 6. Calculate the gene distances for Lactuca saligna:
+
+```{r}
+# Sort genes by chromosome and start position
+Lsaligna_NRC_coord_info <- Lsaligna_NRC_coord_info[order(Lsaligna_NRC_coord_info$chr, Lsaligna_NRC_coord_info$start), ]
+Lsaligna_NRC_coord_info <- Lsaligna_NRC_coord_info %>% left_join(Lsaligna_NRC[,c(1,18)], by = c("gene" = "seqname"))
+
+# Ensure the matrix is initialized correctly
+Lsaligna_NRC_distance_matrix <- matrix(NA, nrow = nrow(Lsaligna_NRC_coord_info), ncol = nrow(Lsaligna_NRC_coord_info))
+rownames(Lsaligna_NRC_distance_matrix) <- Lsaligna_NRC_coord_info$ID
+colnames(Lsaligna_NRC_distance_matrix) <- Lsaligna_NRC_coord_info$ID
+
+# Calculate distances
+# Loop to calculate distances
+for (i in 1:(nrow(Lsaligna_NRC_coord_info) - 1)) { # Adjusted to avoid going out of bounds
+  for (j in (i + 1):nrow(Lsaligna_NRC_coord_info)) {
+    if (!is.na(Lsaligna_NRC_coord_info$chr[i]) && !is.na(Lsaligna_NRC_coord_info$chr[j])) {
+      if (Lsaligna_NRC_coord_info$chr[i] == Lsaligna_NRC_coord_info$chr[j]) {
+        # Calculate distance only if genes are on the same chromosome
+        distance <- Lsaligna_NRC_coord_info$start[j] - Lsaligna_NRC_coord_info$end[i]
+        Lsaligna_NRC_distance_matrix[i, j] <- distance
+        Lsaligna_NRC_distance_matrix[j, i] <- distance # Ensure the matrix is symmetric
+      }
+    }
+  }
+}
+
+
+# convert it into a dataframe
+Lsaligna_NRC_distance_values <- as.vector(Lsaligna_NRC_distance_matrix)
+Lsaligna_NRC_gene_pairs <- expand.grid(rownames(Lsaligna_NRC_distance_matrix), colnames(Lsaligna_NRC_distance_matrix))
+Lsaligna_NRC_distance_df <- data_frame(gene1 = Lsaligna_NRC_gene_pairs$Var1, gene2 = Lsaligna_NRC_gene_pairs$Var2, distance = Lsaligna_NRC_distance_values)
+
+# remove redundant combinations
+Lsaligna_NRC_distance_df$PairID <- apply(Lsaligna_NRC_distance_df[, 1:2], 1, function(x) paste(sort(x), collapse = "_"))
+Lsaligna_NRC_distance_df <- Lsaligna_NRC_distance_df[!duplicated(Lsaligna_NRC_distance_df$PairID), ]
+Lsaligna_NRC_distance_df$PairID <- NULL
+
+# remove the ones on different choromosomes and self comaprisons
+Lsaligna_NRC_distance_df <- subset(Lsaligna_NRC_distance_df, !is.na(Lsaligna_NRC_distance_df$distance))
+Lsaligna_NRC_distance_df <- subset(Lsaligna_NRC_distance_df, gene1 != gene2)
+
+# transform the distances for plotting
+Lsaligna_NRC_distance_df$`normalized distance` <- 1/log(Lsaligna_NRC_distance_df$distance) * 100
+
+# remove the entries with distance higher than 0.5 Mb
+Lsaligna_NRC_distance_df_filtered <- Lsaligna_NRC_distance_df[Lsaligna_NRC_distance_df$distance < 100000,]
+
+Lsaligna_NRC_distance_df_filtered$color <- "#1DA1B7"
+
+write_csv(Lsaligna_NRC_distance_df_filtered, "/path/to/paired_distance/Lsligna_NRC_distance.csv")
+```
+
+#### 7. Calculate the gene distances for Lactuca virosa:
+
+```{r}
+# Sort genes by chromosome and start position
+Lvirosa_NRC_coord_info <- Lvirosa_NRC_coord_info[order(Lvirosa_NRC_coord_info$chr, Lvirosa_NRC_coord_info$start), ]
+Lvirosa_NRC_coord_info <- Lvirosa_NRC_coord_info %>% left_join(Lvirosa_NRC[,c(1,18)], by = c("gene" = "seqname"))
+
+# Ensure the matrix is initialized correctly
+Lvirosa_NRC_distance_matrix <- matrix(NA, nrow = nrow(Lvirosa_NRC_coord_info), ncol = nrow(Lvirosa_NRC_coord_info))
+rownames(Lvirosa_NRC_distance_matrix) <- Lvirosa_NRC_coord_info$ID
+colnames(Lvirosa_NRC_distance_matrix) <- Lvirosa_NRC_coord_info$ID
+
+# Calculate distances
+# Loop to calculate distances
+for (i in 1:(nrow(Lvirosa_NRC_coord_info) - 1)) { # Adjusted to avoid going out of bounds
+  for (j in (i + 1):nrow(Lvirosa_NRC_coord_info)) {
+    if (!is.na(Lvirosa_NRC_coord_info$chr[i]) && !is.na(Lvirosa_NRC_coord_info$chr[j])) {
+      if (Lvirosa_NRC_coord_info$chr[i] == Lvirosa_NRC_coord_info$chr[j]) {
+        # Calculate distance only if genes are on the same chromosome
+        distance <- Lvirosa_NRC_coord_info$start[j] - Lvirosa_NRC_coord_info$end[i]
+        Lvirosa_NRC_distance_matrix[i, j] <- distance
+        Lvirosa_NRC_distance_matrix[j, i] <- distance # Ensure the matrix is symmetric
+      }
+    }
+  }
+}
+
+
+# convert it into a dataframe
+Lvirosa_NRC_distance_values <- as.vector(Lvirosa_NRC_distance_matrix)
+Lvirosa_NRC_gene_pairs <- expand.grid(rownames(Lvirosa_NRC_distance_matrix), colnames(Lvirosa_NRC_distance_matrix))
+Lvirosa_NRC_distance_df <- data_frame(gene1 = Lvirosa_NRC_gene_pairs$Var1, gene2 = Lvirosa_NRC_gene_pairs$Var2, distance = Lvirosa_NRC_distance_values)
+
+# remove redundant combinations
+Lvirosa_NRC_distance_df$PairID <- apply(Lvirosa_NRC_distance_df[, 1:2], 1, function(x) paste(sort(x), collapse = "_"))
+Lvirosa_NRC_distance_df <- Lvirosa_NRC_distance_df[!duplicated(Lvirosa_NRC_distance_df$PairID), ]
+Lvirosa_NRC_distance_df$PairID <- NULL
+
+# remove the ones on different choromosomes and self comaprisons
+Lvirosa_NRC_distance_df <- subset(Lvirosa_NRC_distance_df, !is.na(Lvirosa_NRC_distance_df$distance))
+Lvirosa_NRC_distance_df <- subset(Lvirosa_NRC_distance_df, gene1 != gene2)
+
+# transform the distances for plotting
+Lvirosa_NRC_distance_df$`normalized distance` <- 1/log(Lvirosa_NRC_distance_df$distance) * 100
+
+# remove the entries with distance higher than 0.5 Mb
+Lvirosa_NRC_distance_df_filtered <- Lvirosa_NRC_distance_df[Lvirosa_NRC_distance_df$distance < 100000,]
+
+Lvirosa_NRC_distance_df_filtered$color <- "#BBE0DD"
+
+write_csv(Lvirosa_NRC_distance_df_filtered, "/path/to/paired_distance/Lvirosa_NRC_distance.csv")
+```
+
+#### 8. Merge the all three species paired gene distances:
+
+```{r}
+Lactuca_NRC_distance_df <- rbind(Lsativa_NRC_distance_df_filtered, Lsaligna_NRC_distance_df_filtered, Lvirosa_NRC_distance_df_filtered)
+
+write_csv(Lactuca_NRC_distance_df, "/path/to/paired_distance/Lactuca_NRC_distance.csv")
+```
+
+#### 9. Export species annotation of Lactuca species as well:
+
+```{r}
+Lactuca_NRC_annot <- Lactuca_NRC[,c(1,18,17)]
+Lactuca_NRC_annot <- Lactuca_NRC_annot %>% mutate(color = case_when(
+  Species == "Lactuca sativa" ~ "#1C3557",
+  Species == "Lactuca saligna" ~ "#1DA1B7",
+  Species == "Lactuca virosa" ~ "#BBE0DD",
+  TRUE ~ NA
+))
+
+write_csv(Lactuca_NRC_annot, "/path/to/paired_distance/Lactuca_NRC_annot.csv")
+```
