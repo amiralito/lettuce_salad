@@ -1,0 +1,594 @@
+---
+title: "5_PAML"
+author: "AmirAli Toghani"
+date: "2025-02-14"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(Biostrings)
+library(ggtree)
+library(pheatmap)
+library(reshape2)
+library(svglite)
+
+```
+
+#### 1. Import each of the subclades:
+
+```{r}
+Lactuca_NRC_helper_clade <- read.tree("/path/to/Lactuca_NRC_helpers.tree")
+
+Lactuca_NRC_sensor_c1_clade <- read.tree("/path/to/Lactuca_NRC_sensors_c1.tree")
+Lactuca_NRC_sensor_c2_clade <- read.tree("/path/to/Lactuca_NRC_sensors_c2.tree")
+Lactuca_NRC_sensor_c3_clade <- read.tree("/path/to/Lactuca_NRC_sensors_c3.tree")
+```
+
+#### 2. Import the nucleotide sequences and extract the subdomains:
+
+```{r}
+Lactuca_NRC_seq_nt <- readDNAStringSet("/path/to/Lactuca_NRC_seq_nt.fasta")
+Lactuca_NRC_seq_nt <- Lactuca_NRC_seq_nt[Lactuca_NRC_NBARC$seqname] # sort the sequences
+
+Lactuca_NRC_seq_nt@ranges@NAMES <- Lactuca_NRC_NBARC$ID
+
+
+# extract the subdomains
+Lactuca_NRC_seq_nt_CC <- subseq(Lactuca_NRC_seq_nt, start = 1, end = Lactuca_NRC_NBARC$start * 3)
+
+Lactuca_NRC_seq_nt_NBARC <- subseq(Lactuca_NRC_seq_nt, start = (Lactuca_NRC_NBARC$start * 3)+1, end = Lactuca_NRC_NBARC$end * 3)
+
+Lactuca_NRC_seq_nt_LRR <- subseq(Lactuca_NRC_seq_nt, start = (Lactuca_NRC_NBARC$end * 3)+1, end = Lactuca_NRC_seq_nt@ranges@width)
+
+```
+
+#### 3. Remove the stop codons for PAML analysis:
+
+```{r}
+# remove the stop codon
+Lactuca_NRC_seq_nt_ns <- subseq(Lactuca_NRC_seq_nt, 1, width(Lactuca_NRC_seq_nt) - 3)
+writeXStringSet(Lactuca_NRC_seq_nt_ns, "/path/to/Lactuca_NRC_seq_nt_ns.fasta")
+
+
+Lactuca_NRC_helper_seq_nt_ns <- Lactuca_NRC_seq_nt_ns[Lactuca_NRC_helper$seqname] %>% writeXStringSet("/path/to/paml/Lactuca_NRC_helper_seq_nt_ns.fasta")
+
+Lactuca_NRC_sensor_c1_seq_nt_ns <- Lactuca_NRC_seq_nt_ns[Lactuca_NRC_sensor_c1_clade$tip.label] %>% writeXStringSet("/path/to/paml/Lactuca_NRC_sensor_c1_seq_nt_ns.fasta")
+
+Lactuca_NRC_sensor_c2_seq_nt_ns <- Lactuca_NRC_seq_nt_ns[Lactuca_NRC_sensor_c2_clade$tip.label] %>% writeXStringSet("/path/to/paml/Lactuca_NRC_sensor_c2_seq_nt_ns.fasta")
+
+Lactuca_NRC_sensor_c3_seq_nt_ns <- Lactuca_NRC_seq_nt_ns[Lactuca_NRC_sensor_c3_clade$tip.label] %>% writeXStringSet("/path/to/paml/Lactuca_NRC_sensor_c3_seq_nt_ns.fasta")
+```
+
+#### 4. write a function to import a modified rst file from the model M8 analysis of PAML. This will extract the position and posterior probability of each postion:
+
+```{r}
+rst_processor <- function(file_path) {
+  # Read the file as raw text
+  raw_data <- readLines(file_path)
+  
+  # Process each line
+  processed_data <- lapply(raw_data, function(line) {
+    # Extract the content inside parentheses
+    match <- regmatches(line, gregexpr("\\(.*?\\)", line))[[1]]
+    
+    # Remove the parentheses section from the line
+    line_no_parentheses <- gsub("\\(.*?\\)", "", line)
+    
+    # Remove '+-' from the line
+    line_cleaned <- gsub("\\+/-", "", line_no_parentheses)
+    
+    # Split the remaining line by whitespace
+    parts <- strsplit(trimws(line_cleaned), "\\s+")[[1]]
+    
+    # Add the parentheses content as a single column
+    c(parts, match)
+  })
+  
+  # Find the maximum number of columns for alignment
+  max_cols <- max(sapply(processed_data, length))
+  
+  # Pad rows with NA to match the column count
+  processed_data <- lapply(processed_data, function(row) c(row, rep(NA, max_cols - length(row))))
+  
+  # Convert to a data frame
+  data <- as.data.frame(do.call(rbind, processed_data), stringsAsFactors = FALSE)
+  
+  # Filter the required columns and rename them
+  library(dplyr)
+  data_filtered <- data[, c(1, 2, 13)] %>%
+    setNames(c("site", "Amino Acid in reference sequence", "P"))
+  
+  data_filtered[,3] <- as.numeric(data_filtered[,3])
+  data_filtered[,1] <- as.numeric(data_filtered[,1])
+  
+  data_filtered <- data_filtered %>% 
+    mutate("0.05" = case_when(P > 0.95 & P < 0.99 ~ TRUE)) %>%
+    mutate("0.01" = case_when(P > 0.99 ~ TRUE))
+  
+  data_filtered[is.na(data_filtered)] <- FALSE
+  
+  # Return the filtered and formatted data
+  return(data_filtered)
+}
+```
+
+#### 5. Import the processed rst file for each clade:
+
+```{r}
+helper_rst_path <- "/path/to/paml/helpers/M8/p_full.rst"
+sensors_c1_rst_path <- "/path/to/paml/c1/M8/p_full.rst"
+sensors_c2_rst_path <- "/path/to/paml/c2/M8/p_full.rst"
+sensors_c3_rst_path <- "/path/to/paml/c3/M8/p_full.rst"
+
+helpers_rst <- rst_processor(helper_rst_path)
+sensors_c1_rst <- rst_processor(sensors_c1_rst_path)
+sensors_c2_rst <- rst_processor(sensors_c2_rst_path)
+sensors_c3_rst <- rst_processor(sensors_c3_rst_path)
+
+```
+
+#### 6. Plot the residues under positive selection:
+##### Custom theme:
+
+```{r}
+theme_custom4 <- theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  legend.position = "none",
+  panel.background = element_blank(),
+  plot.background = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  plot.title = element_blank(),
+  plot.subtitle = element_blank(),
+  plot.caption = element_blank(),
+  axis.line = element_blank(),
+)
+
+```
+
+##### Plot the posterious probabilities and residues under positive selection:
+
+```{r}
+# Helpers
+helpers_rst_p <- ggplot(helpers_rst, aes(x = site, y = P)) +
+  
+  geom_line(alpha = 0.8, group = 1) + # Make lines 50% transparent
+  
+  geom_point(data = subset(helpers_rst, `0.01` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 24, size = 3, alpha = 0.8, color = "#c1121f", fill = "#c1121f", stroke = 0.5) +
+  
+  geom_point(data = subset(helpers_rst, `0.05` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 21, size = 3, alpha = 0.8, color = "#FE6F5E", fill = "#FE6F5E", stroke = 0.5) +
+  
+  scale_y_continuous(limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  scale_x_continuous(limits = c(0, 1050), breaks = c(0, 125, 250, 375, 500, 625, 750, 875, 1000)) +
+  
+  labs(y = "Posterior Probability", x = "Site") +
+  theme_minimal()
+
+helpers_rst_p
+
+ggsave(filename = "/path/to/helpers_rst.svg", 
+       helpers_rst_p, width = 10, height = 2, dpi = "retina")
+
+
+# Sensor clade 1
+sensors_c1_rst_p <- ggplot(sensors_c1_rst, aes(x = site, y = P)) +
+  
+  geom_line(alpha = 0.8, group = 1) + # Make lines 50% transparent
+  
+  geom_point(data = subset(sensors_c1_rst, `0.01` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 24, size = 3, alpha = 0.8, color = "#c1121f", fill = "#c1121f", stroke = 0.5) +
+  
+  geom_point(data = subset(sensors_c1_rst, `0.05` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 21, size = 3, alpha = 0.8, color = "#FE6F5E", fill = "#FE6F5E", stroke = 0.5) +
+  
+  scale_y_continuous(limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  scale_x_continuous(limits = c(0, 1050), breaks = c(0, 125, 250, 375, 500, 625, 750, 875, 1000)) +
+
+  labs(y = "Posterior Probability", x = "Site") +
+  theme_minimal()
+
+sensors_c1_rst_p
+
+ggsave(filename = "/path/to/sensors_c1_rst.svg", 
+       sensors_c1_rst_p, width = 10, height = 2, dpi = "retina")
+
+
+# Sensor clade 2
+sensors_c2_rst_p <- ggplot(sensors_c2_rst, aes(x = site, y = P)) +
+  
+  geom_line(alpha = 0.8, group = 1) + # Make lines 50% transparent
+  
+  geom_point(data = subset(sensors_c2_rst, `0.01` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 24, size = 3, alpha = 0.8, color = "#c1121f", fill = "#c1121f", stroke = 0.5) +
+  
+  geom_point(data = subset(sensors_c2_rst, `0.05` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 21, size = 3, alpha = 0.8, color = "#FE6F5E", fill = "#FE6F5E", stroke = 0.5) +
+  
+  scale_y_continuous(limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  scale_x_continuous(limits = c(0, 1050), breaks = c(0, 125, 250, 375, 500, 625, 750, 875, 1000)) +
+
+  labs(y = "Posterior Probability", x = "Site") +
+  theme_minimal()
+
+sensors_c2_rst_p
+
+ggsave(filename = "/path/to/sensors_c2_rst.svg", 
+       sensors_c2_rst_p, width = 10, height = 2, dpi = "retina")
+
+
+
+# Sensor clade 3
+sensors_c3_rst_p <- ggplot(sensors_c3_rst, aes(x = site, y = P)) +
+  
+  geom_line(alpha = 0.8, group = 1) + # Make lines 50% transparent
+  
+  geom_point(data = subset(sensors_c3_rst, `0.01` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 24, size = 3, alpha = 0.8, color = "#c1121f", fill = "#c1121f", stroke = 0.5) +
+  
+  geom_point(data = subset(sensors_c3_rst, `0.05` == TRUE), 
+             aes(x = site, y = P), 
+             shape = 21, size = 3, alpha = 0.8, color = "#FE6F5E", fill = "#FE6F5E", stroke = 0.5) +
+  
+  scale_y_continuous(limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  scale_x_continuous(limits = c(0, 1050), breaks = c(0, 125, 250, 375, 500, 625, 750, 875, 1000)) +
+
+  labs(y = "Posterior Probability", x = "Site") +
+  theme_minimal()
+
+sensors_c3_rst_p
+
+ggsave(filename = "/path/to/sensors_c3_rst.svg", 
+       sensors_c3_rst_p, width = 10, height = 2, dpi = "retina")
+```
+
+#### 7. Export the sites under positive selection and export them for annotating the structure in ChimeraX:
+
+```{ChimeraX}
+
+# color the domains
+
+## Lactuca_sativa_Helixer_NC_056630.2_001736.1_CNL >>> Clade 3
+color #1/a:1-180 #D1D3D4
+color #1/a:181-352 #A7A9AC
+color #1/a:353-532 #6D6E71
+color #1/a:533-928 #333234
+
+
+## Lactuca_sativa_Helixer_NC_056630.2_000504.1_NL >>> Clade 1
+color #2/a:1-108 #D1D3D4
+color #2/a:109-267 #A7A9AC
+color #2/a:268-470 #6D6E71
+color #2/a:471-879 #333234
+```
+
+```{r}
+c3_select_residues <- read_csv("/path/to/structure/Lactuca_sativa_Helixer_NC_056630.2_001736.1_CNL Annotations.csv")
+c3_select_residues <- c3_select_residues %>% filter(Type == "site")
+
+c3_select_residues_chiemrax <- paste0("color ","#1/a:",paste(c1_select_residues$Minimum, collapse = ","), " #FF2400")
+
+write(c3_select_residues_chiemrax,"/path/to/c3_color.txt")
+
+
+c1_select_residues <- read_csv("/path/to/structure/Lactuca_sativa_Helixer_NC_056630.2_000504.1_NL Annotations.csv")
+c1_select_residues <- c1_select_residues %>% filter(Type == "site")
+
+c1_select_residues_chiemrax <- paste0("color ","#2/a:",paste(c1_select_residues$Minimum, collapse = ","), " #FF2400")
+
+write(c1_select_residues_chiemrax,"/path/to/c1_color.txt")
+
+# run the exported commands in ChimeraX to color the residues under selection
+
+```
+
+
+#### 8. Import each of the subclades to extract the subdomains:
+
+```{r}
+Lactuca_NRC_helper_clade <- read.tree("/path/to/trees/Lactuca_NRC_helpers.tree")
+
+Lactuca_NRC_sensor_c1_clade <- read.tree("/path/to/trees/Lactuca_NRC_sensors_c1.tree")
+Lactuca_NRC_sensor_c2_clade <- read.tree("/path/to/trees/Lactuca_NRC_sensors_c2.tree")
+Lactuca_NRC_sensor_c3_clade <- read.tree("/path/to/trees/Lactuca_NRC_sensors_c3.tree")
+```
+
+
+#### 9. Extract the subdomains of each clade and export their sequences for alignment:
+
+```{r}
+## helpers
+Lactuca_NRC_helper_nt_CC <- Lactuca_NRC_seq_nt_CC[Lactuca_NRC_seq_nt_CC@ranges@NAMES %in% Lactuca_NRC_helper_clade$tip.label]
+Lactuca_NRC_helper_nt_NBARC <- Lactuca_NRC_seq_nt_NBARC[Lactuca_NRC_seq_nt_NBARC@ranges@NAMES %in% Lactuca_NRC_helper_clade$tip.label]
+Lactuca_NRC_helper_nt_LRR <- Lactuca_NRC_seq_nt_LRR[Lactuca_NRC_seq_nt_LRR@ranges@NAMES %in% Lactuca_NRC_helper_clade$tip.label]
+
+writeXStringSet(Lactuca_NRC_helper_nt_CC, "/path/to/paml_domains/Lactuca_NRC_helper_nt_CC.fasta")
+writeXStringSet(Lactuca_NRC_helper_nt_NBARC, "/path/to/paml_domains/Lactuca_NRC_helper_nt_NBARC.fasta")
+writeXStringSet(Lactuca_NRC_helper_nt_LRR, "/path/to/paml_domains/Lactuca_NRC_helper_nt_LRR.fasta")
+
+
+## sensor clade 1
+Lactuca_NRC_sensor_c1_nt_CC <- Lactuca_NRC_seq_nt_CC[Lactuca_NRC_seq_nt_CC@ranges@NAMES %in% Lactuca_NRC_sensor_c1_clade$tip.label]
+Lactuca_NRC_sensor_c1_nt_NBARC <- Lactuca_NRC_seq_nt_NBARC[Lactuca_NRC_seq_nt_NBARC@ranges@NAMES %in% Lactuca_NRC_sensor_c1_clade$tip.label]
+Lactuca_NRC_sensor_c1_nt_LRR <- Lactuca_NRC_seq_nt_LRR[Lactuca_NRC_seq_nt_LRR@ranges@NAMES %in% Lactuca_NRC_sensor_c1_clade$tip.label]
+
+writeXStringSet(Lactuca_NRC_sensor_c1_nt_CC, "/path/to/paml_domains/Lactuca_NRC_sensor_c1_nt_CC.fasta")
+writeXStringSet(Lactuca_NRC_sensor_c1_nt_NBARC, "/path/to/paml_domains/Lactuca_NRC_sensor_c1_nt_NBARC.fasta")
+writeXStringSet(Lactuca_NRC_sensor_c1_nt_LRR, "/path/to/paml_domains/Lactuca_NRC_sensor_c1_nt_LRR.fasta")
+
+
+## sensor clade 2
+Lactuca_NRC_sensor_c2_nt_CC <- Lactuca_NRC_seq_nt_CC[Lactuca_NRC_seq_nt_CC@ranges@NAMES %in% Lactuca_NRC_sensor_c2_clade$tip.label]
+Lactuca_NRC_sensor_c2_nt_NBARC <- Lactuca_NRC_seq_nt_NBARC[Lactuca_NRC_seq_nt_NBARC@ranges@NAMES %in% Lactuca_NRC_sensor_c2_clade$tip.label]
+Lactuca_NRC_sensor_c2_nt_LRR <- Lactuca_NRC_seq_nt_LRR[Lactuca_NRC_seq_nt_LRR@ranges@NAMES %in% Lactuca_NRC_sensor_c2_clade$tip.label]
+
+writeXStringSet(Lactuca_NRC_sensor_c2_nt_CC, "/path/to/paml_domains/Lactuca_NRC_sensor_c2_nt_CC.fasta")
+writeXStringSet(Lactuca_NRC_sensor_c2_nt_NBARC, "/path/to/paml_domains/Lactuca_NRC_sensor_c2_nt_NBARC.fasta")
+writeXStringSet(Lactuca_NRC_sensor_c2_nt_LRR, "/path/to/paml_domains/Lactuca_NRC_sensor_c2_nt_LRR.fasta")
+
+
+## sensor clade 3
+Lactuca_NRC_sensor_c3_nt_CC <- Lactuca_NRC_seq_nt_CC[Lactuca_NRC_seq_nt_CC@ranges@NAMES %in% Lactuca_NRC_sensor_c3_clade$tip.label]
+Lactuca_NRC_sensor_c3_nt_NBARC <- Lactuca_NRC_seq_nt_NBARC[Lactuca_NRC_seq_nt_NBARC@ranges@NAMES %in% Lactuca_NRC_sensor_c3_clade$tip.label]
+Lactuca_NRC_sensor_c3_nt_LRR <- Lactuca_NRC_seq_nt_LRR[Lactuca_NRC_seq_nt_LRR@ranges@NAMES %in% Lactuca_NRC_sensor_c3_clade$tip.label]
+Lactuca_NRC_sensor_c3_nt_LRR <- Lactuca_NRC_sensor_c3_nt_LRR[Lactuca_NRC_sensor_c3_nt_LRR@ranges@width > 500] 
+# additional step for this clade to remove very short LRR sequences
+
+writeXStringSet(Lactuca_NRC_sensor_c3_nt_CC, "/path/to/paml_domains/Lactuca_NRC_sensor_c3_nt_CC.fasta")
+writeXStringSet(Lactuca_NRC_sensor_c3_nt_NBARC, "/path/to/paml_domains/Lactuca_NRC_sensor_c3_nt_NBARC.fasta")
+writeXStringSet(Lactuca_NRC_sensor_c3_nt_LRR, "/path/to/paml_domains/Lactuca_NRC_sensor_c3_nt_LRR.fasta")
+
+```
+
+
+#### 10. Import the dN and dS values generated by CodeML:
+##### A function to import the dN and dS values for pairs of NLRs from the matrix output of CodeML >>> 2NG.dN & 2NG.dS files
+```{r}
+# A function to import the dN and dS values for pairs of NLRs from the matrix output of CodeML >>> 2NG.dN & 2NG.dS files
+process_dn_ds_files <- function(folder_path) {
+  # Construct file paths
+  dn_file <- file.path(folder_path, "2NG.dN")
+  ds_file <- file.path(folder_path, "2NG.dS")
+  
+  # Function to parse a triangular matrix file into a data frame
+  parse_triangular_matrix <- function(file_path, value_name) {
+    # Read the file
+    lines <- readLines(file_path)
+    
+    # Extract the number of entries
+    num_entries <- as.integer(trimws(lines[1]))
+    
+    # Initialize variables
+    labels <- c()
+    data <- list()
+    
+    for (i in 2:length(lines)) {
+      # Split each line into parts
+      parts <- unlist(strsplit(trimws(lines[i]), "\\s+"))
+      if (length(parts) > 0) {
+        labels <- c(labels, parts[1]) # First part is the label
+        # Add remaining parts as numeric values; handle empty rows
+        data[[i - 1]] <- if (length(parts) > 1) as.numeric(parts[-1]) else numeric()
+      }
+    }
+    
+    # Create a long format data frame
+    result <- data.frame(Pair1 = character(), Pair2 = character(), Value = numeric(), stringsAsFactors = FALSE)
+    
+    for (i in 1:length(data)) {
+      if (length(data[[i]]) > 0) { # Skip rows with no data
+        for (j in 1:(i - 1)) { # Lower triangle only
+          if (j <= length(data[[i]]) && !is.na(data[[i]][j])) {
+            result <- rbind(result, data.frame(
+              Pair1 = labels[i],
+              Pair2 = labels[j],
+              Value = data[[i]][j]
+            ))
+          }
+        }
+      }
+    }
+    
+    # Rename the value column
+    colnames(result)[3] <- value_name
+    return(result)
+  }
+  
+  # Parse the dN and dS files
+  dn_table <- parse_triangular_matrix(dn_file, "dN")
+  ds_table <- parse_triangular_matrix(ds_file, "dS")
+  
+  # Merge the dN and dS tables
+  combined_table <- inner_join(dn_table, ds_table, by = c("Pair1", "Pair2"))
+  
+  return(combined_table)
+}
+```
+
+##### import the dN & dS files from the M8 model run for each clade and domain
+```{r}
+# import the dN & dS files from the M8 model run for each clade and domain
+helpers_dnds <- process_dn_ds_files("/path/to/paml/helpers/M8/")
+helpers_CC_dnds <- process_dn_ds_files("/path/to/paml_domains/helpers/CC/")
+helpers_NBARC_dnds <- process_dn_ds_files("/path/to/paml_domains/helpers/NBARC/")
+helpers_LRR_dnds <- process_dn_ds_files("/path/to/paml_domains/helpers/LRR/")
+
+helpers_dnds_list <- list(helpers_full = helpers_dnds, 
+                          helpers_CC = helpers_CC_dnds, 
+                          helpers_NBARC = helpers_NBARC_dnds, 
+                          helpers_LRR = helpers_LRR_dnds)
+
+write_csv(helpers_dnds_list$helpers_full, "/path/to/paml_domains/outputs/helper_full.csv")
+write_csv(helpers_dnds_list$helpers_CC, "/path/to/paml_domains/outputs/helper_cc.csv")
+write_csv(helpers_dnds_list$helpers_NBARC, "/path/to/paml_domains/outputs/helper_nbarc.csv")
+write_csv(helpers_dnds_list$helpers_LRR, "/path/to/paml_domains/outputs/helper_lrr.csv")
+
+
+
+c1_dnds <- process_dn_ds_files("/path/to/paml/c1/M8/")
+c1_CC_dnds <- process_dn_ds_files("/path/to/paml_domains/c1/CC/")
+c1_NBARC_dnds <- process_dn_ds_files("/path/to/paml_domains/c1/NBARC/")
+c1_LRR_dnds <- process_dn_ds_files("/path/to/paml_domains/c1/LRR/")
+
+c1_dnds_list <- list(c1_full = c1_dnds, 
+                     c1_CC = c1_CC_dnds, 
+                     c1_NBARC = c1_NBARC_dnds, 
+                     c1_LRR = c1_LRR_dnds)
+
+write_csv(c1_dnds_list$c1_full, "/path/to/paml_domains/outputs/c1_full.csv")
+write_csv(c1_dnds_list$c1_CC, "/path/to/paml_domains/outputs/c1_cc.csv")
+write_csv(c1_dnds_list$c1_NBARC, "/path/to/paml_domains/outputs/c1_nbarc.csv")
+write_csv(c1_dnds_list$c1_LRR, "/path/to/paml_domains/outputs/c1_lrr.csv")
+
+
+
+c2_dnds <- process_dn_ds_files("/path/to/paml/c2/M8/")
+c2_CC_dnds <- process_dn_ds_files("/path/to/paml_domains/c2/CC/")
+c2_NBARC_dnds <- process_dn_ds_files("/path/to/paml_domains/c2/NBARC/")
+c2_LRR_dnds <- process_dn_ds_files("/path/to/paml_domains/c2/LRR/")
+
+c2_dnds_list <- list(c2_full = c2_dnds, 
+                     c2_CC = c2_CC_dnds, 
+                     c2_NBARC = c2_NBARC_dnds, 
+                     c2_LRR = c2_LRR_dnds)
+
+write_csv(c2_dnds_list$c2_full, "/path/to/paml_domains/outputs/c2_full.csv")
+write_csv(c2_dnds_list$c2_CC, "/path/to/paml_domains/outputs/c2_cc.csv")
+write_csv(c2_dnds_list$c2_NBARC, "/path/to/paml_domains/outputs/c2_nbarc.csv")
+write_csv(c2_dnds_list$c2_LRR, "/path/to/paml_domains/outputs/c2_lrr.csv")
+
+
+
+c3_dnds <- process_dn_ds_files("/path/to/paml/c3/M8/")
+c3_CC_dnds <- process_dn_ds_files("/path/to/paml_domains/c3/CC/")
+c3_NBARC_dnds <- process_dn_ds_files("/path/to/paml_domains/c3/NBARC/")
+c3_LRR_dnds <- process_dn_ds_files("/path/to/paml_domains/c3/LRR/")
+
+c3_dnds_list <- list(c3_full = c3_dnds, 
+                     c3_CC = c3_CC_dnds, 
+                     c3_NBARC = c3_NBARC_dnds, 
+                     c3_LRR = c3_LRR_dnds)
+
+write_csv(c3_dnds_list$c3_full, "/path/to/paml_domains/outputs/c3_full.csv")
+write_csv(c3_dnds_list$c3_CC, "/path/to/paml_domains/outputs/c3_cc.csv")
+write_csv(c3_dnds_list$c3_NBARC, "/path/to/paml_domains/outputs/c3_nbarc.csv")
+write_csv(c3_dnds_list$c3_LRR, "/path/to/paml_domains/outputs/c3_lrr.csv")
+```
+
+##### Plot them:
+```{r}
+setwd("/path/to/dnds")
+
+# helpers
+for (name in names(helpers_dnds_list)) {
+  
+  n <- helpers_dnds_list[[name]]
+  
+  p <- ggplot(n, aes(y = `dN`, x = `dS`)) +
+    geom_jitter(color = "black", size = 6, shape = 21, fill = "#FF6978", stroke = 0.5) +
+    xlim(c(0,8)) +
+    ylim(c(0,8)) +
+    
+    labs(
+    x = expression(italic(d)[italic(S)]),  
+    y = expression(italic(d)[italic(N)])) +
+    
+    geom_abline(slope = 1, intercept = 0, color = "black", alpha = 0.2) +
+    theme_minimal() +
+    theme(axis.text = element_text(size = 25), 
+          axis.title = element_text(size = 25), 
+          axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5))
+  
+  ggsave(filename = paste0(name, '.png'), dpi = "retina", plot = p, width = 5, height = 5)
+}
+
+
+
+# clade 1
+for (name in names(c1_dnds_list)) {
+  
+  n <- c1_dnds_list[[name]]
+  
+  p <- ggplot(n, aes(y = `dN`, x = `dS`)) +
+    geom_jitter(color = "white", size = 6, shape = 21, fill = "#002626", stroke = 0.5) +
+    xlim(c(0,8)) +
+    ylim(c(0,8)) +
+    
+    labs(
+    x = expression(italic(d)[italic(S)]),  
+    y = expression(italic(d)[italic(N)])) +
+    
+    geom_abline(slope = 1, intercept = 0, color = "black", alpha = 0.2) +
+    theme_minimal() +
+    theme(axis.text = element_text(size = 25), 
+          axis.title = element_text(size = 25), 
+          axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5))
+  
+  ggsave(filename = paste0(name, '.png'), dpi = "retina", plot = p, width = 5, height = 5)
+}
+
+
+
+# clade 2
+for (name in names(c2_dnds_list)) {
+  
+  n <- c2_dnds_list[[name]]
+  
+  p <- ggplot(n, aes(y = `dN`, x = `dS`)) +
+    geom_jitter(color = "black", size = 6, shape = 21, fill = "#65894E", stroke = 0.5) +
+    xlim(c(0,8)) +
+    ylim(c(0,8)) +
+    
+    labs(
+    x = expression(italic(d)[italic(S)]),  
+    y = expression(italic(d)[italic(N)])) +
+    
+    geom_abline(slope = 1, intercept = 0, color = "black", alpha = 0.2) +
+    theme_minimal() +
+    theme(axis.text = element_text(size = 25), 
+          axis.title = element_text(size = 25), 
+          axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5))
+  
+  ggsave(filename = paste0(name, '.png'), dpi = "retina", plot = p, width = 5, height = 5)
+}
+
+
+
+# clade 3
+for (name in names(c3_dnds_list)) {
+  
+  n <- c3_dnds_list[[name]]
+  
+  p <- ggplot(n, aes(y = `dN`, x = `dS`)) +
+    geom_jitter(color = "black", size = 6, shape = 21, fill = "#93C572", stroke = 0.5) +
+    xlim(c(0,8)) +
+    ylim(c(0,8)) +
+    
+    labs(
+    x = expression(italic(d)[italic(S)]),  
+    y = expression(italic(d)[italic(N)])) +
+    
+    geom_abline(slope = 1, intercept = 0, color = "black", alpha = 0.2) +
+    theme_minimal() +
+    theme(axis.text = element_text(size = 25), 
+          axis.title = element_text(size = 25), 
+          axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5))
+  
+  ggsave(filename = paste0(name, '.png'), dpi = "retina", plot = p, width = 5, height = 5)
+}
+
+```
+
