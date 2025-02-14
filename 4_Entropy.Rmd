@@ -1,0 +1,328 @@
+---
+title: "4_Entropy"
+author: "AmirAli Toghani"
+date: "2025-02-14"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(Biostrings)
+library(ggtree)
+library(pheatmap)
+library(reshape2)
+library(svglite)
+library(entropy)
+library(ggseqlogo)
+```
+
+#### 1. Import the amino acid alignments for helpers and sensors:
+
+```{r}
+Lactuca_NRC_helper_aln <- readAAStringSet("/Users/toghani/Desktop/Lettuce_salad/analysis/lactuca/phylogeny/Lactuca_NRC_helper_seq.afa")
+Lactuca_NRC_sensor_aln <- readAAStringSet("/Users/toghani/Desktop/Lettuce_salad/analysis/lactuca/phylogeny/Lactuca_NRC_sensor_seq_trimmed.afa")
+
+# extract the sensor subclades
+Lactuca_NRC_sensor_c1_aln <- Lactuca_NRC_sensor_aln[Lactuca_NRC_sensor_c1_clade$tip.label]
+Lactuca_NRC_sensor_c2_aln <- Lactuca_NRC_sensor_aln[Lactuca_NRC_sensor_c2_clade$tip.label]
+Lactuca_NRC_sensor_c3_aln <- Lactuca_NRC_sensor_aln[Lactuca_NRC_sensor_c3_clade$tip.label]
+
+```
+
+#### 2. Two functions for calculating the entropy:
+
+```{r}
+# Function to convert a Biostrings/dataframe object to a dataframe and break the sequence into characters
+convert_to_dataframe <- function(alignment) {
+  # Extract sequences as strings
+  sequences <- sapply(alignment, as.character)
+  # Split each sequence into individual characters and convert to a matrix
+  alignment_matrix <- do.call(rbind, strsplit(sequences, ""))
+  # Convert the matrix to a dataframe
+  alignment_df <- as.data.frame(alignment_matrix, stringsAsFactors = FALSE)
+  # Naming columns as positions
+  colnames(alignment_df) <- paste(seq_len(ncol(alignment_df)))
+  
+  return(alignment_df)
+}
+
+
+
+# Function to calculate entropy for multiple columns and return as a dataframe
+calculate_entropy_df <- function(dataframe) {
+  # Function to calculate entropy for a single column
+  calculate_column_entropy <- function(column) {
+    # Remove any NA values (if there are any)
+    column <- na.omit(column)
+    # Calculate frequencies
+    freq_table <- table(column)
+    # Convert to proportions
+    proportions <- freq_table / sum(freq_table)
+    # Calculate and return entropy
+    entropy.empirical(proportions, unit = "log2")
+  }
+  
+  # Ensure that the dataframe is processed column-wise
+  entropy_values <- sapply(dataframe, calculate_column_entropy, simplify = FALSE)
+  
+  # Flatten the list if necessary
+  if (is.list(entropy_values)) {
+    entropy_values <- unlist(entropy_values)
+  }
+  
+  # Create a dataframe with positions and entropy values
+  entropy_df <- data.frame(Position = seq_along(entropy_values), Entropy = entropy_values)
+  
+  return(entropy_df)
+}
+```
+
+
+#### 3. Let's do it!
+
+```{r}
+# whole NRC network togehter
+Lactuca_NRC_aln_df <- convert_to_dataframe(Lactuca_NRC_aln)
+Lactuca_NRC_entropy <- calculate_entropy_df(Lactuca_NRC_aln_df)
+
+# helpers
+Lactuca_NRC_helper_aln_df <- convert_to_dataframe(Lactuca_NRC_helper_aln)
+Lactuca_NRC_helper_entropy <- calculate_entropy_df(Lactuca_NRC_helper_aln_df)
+
+write_csv(Lactuca_NRC_helper_entropy, "/path/to/Lactuca_NRC_helper_entropy.csv")
+
+
+
+# sensor clade 1
+Lactuca_NRC_sensor_c1_aln_df <- convert_to_dataframe(Lactuca_NRC_sensor_c1_aln)
+Lactuca_NRC_sensor_c1_entropy <- calculate_entropy_df(Lactuca_NRC_sensor_c1_aln_df)
+
+write_csv(Lactuca_NRC_sensor_c1_entropy, "/path/to/Lactuca_NRC_sensor_c1_entropy.csv")
+
+# sensor clade 
+Lactuca_NRC_sensor_c2_aln_df <- convert_to_dataframe(Lactuca_NRC_sensor_c2_aln)
+Lactuca_NRC_sensor_c2_entropy <- calculate_entropy_df(Lactuca_NRC_sensor_c2_aln_df)
+
+write_csv(Lactuca_NRC_sensor_c2_entropy, "/path/to/Lactuca_NRC_sensor_c2_entropy.csv")
+
+# sensor clade 3
+Lactuca_NRC_sensor_c3_aln_df <- convert_to_dataframe(Lactuca_NRC_sensor_c3_aln)
+Lactuca_NRC_sensor_c3_entropy <- calculate_entropy_df(Lactuca_NRC_sensor_c3_aln_df)
+
+write_csv(Lactuca_NRC_sensor_c3_entropy, "/path/to/Lactuca_NRC_sensor_c3_entropy.csv")
+
+```
+
+#### 4. Plot the entropies:
+##### graphics prep:
+```{r}
+breakpoints <- c(0, 1.5, 4.32)
+
+
+theme_custom2 <- theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  legend.position = "none",
+  panel.background = element_blank(),
+  plot.background = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  plot.title = element_blank(),
+  plot.subtitle = element_blank(),
+  plot.caption = element_blank(),
+  axis.line = element_line(colour = "black", size = 0.25)
+)
+
+```
+
+##### Helpers:
+```{r}
+Lactuca_NRC_helper_entropy_p <- ggplot(Lactuca_NRC_helper_entropy, aes(x = Position, y = Entropy)) +
+  geom_line(alpha = 0.5) +
+  geom_point(data = subset(Lactuca_NRC_helper_entropy, Entropy > 1.5), aes(x = Position, y = Entropy), color = "#CC3333", size = 1) +
+  scale_color_identity() + # Use the colors as they are
+  ylim(c(0,4.32)) +
+  xlim(c(0,974)) +
+  geom_hline(yintercept = 1.5, linetype = "dotted", color = "#6C6C6C", size = 0.35, alpha = 1) +
+  theme_custom2
+Lactuca_NRC_helper_entropy_p
+
+ggsave(filename = "/path/to/NRC_helper_entropy.svg", 
+       Lactuca_NRC_helper_entropy_p, width = 10, height = 1.5, dpi = "retina")
+```
+
+##### Sensor clade 1:
+```{r}
+Lactuca_NRC_sensor_c1_entropy_p <- ggplot(Lactuca_NRC_sensor_c1_entropy, aes(x = Position, y = Entropy)) +
+  geom_line(alpha = 0.5) +
+  geom_point(data = subset(Lactuca_NRC_sensor_c1_entropy, Entropy > 1.5), aes(x = Position, y = Entropy), color = "#CC3333", size = 1) +
+  scale_color_identity() + # Use the colors as they are
+  ylim(c(0,4.32)) +
+  xlim(c(0,974)) +
+  geom_hline(yintercept = 1.5, linetype = "dotted", color = "#6C6C6C", size = 0.35, alpha = 1) +
+  theme_custom2
+Lactuca_NRC_sensor_c1_entropy_p
+
+ggsave(filename = "/path/to/NRC_sensor_c1_entropy.svg", 
+       Lactuca_NRC_sensor_c1_entropy_p, width = 10, height = 1.5, dpi = "retina")
+```
+
+##### Sensor clade 2:
+```{r}
+Lactuca_NRC_sensor_c2_entropy_p <- ggplot(Lactuca_NRC_sensor_c2_entropy, aes(x = Position, y = Entropy)) +
+  geom_line(alpha = 0.5) +
+  geom_point(data = subset(Lactuca_NRC_sensor_c2_entropy, Entropy > 1.5), aes(x = Position, y = Entropy), color = "#CC3333", size = 1) +
+  scale_color_identity() + # Use the colors as they are
+  ylim(c(0,4.32)) +
+  xlim(c(0,974)) +
+  geom_hline(yintercept = 1.5, linetype = "dotted", color = "#6C6C6C", size = 0.35, alpha = 1) +
+  theme_custom2
+
+Lactuca_NRC_sensor_c2_entropy_p
+
+ggsave(filename = "/path/to/NRC_sensor_c2_entropy.svg", 
+       Lactuca_NRC_sensor_c2_entropy_p, width = 10, height = 1.5, dpi = "retina")
+```
+
+##### Sensor clade 3:
+```{r}
+Lactuca_NRC_sensor_c3_entropy_p <- ggplot(Lactuca_NRC_sensor_c3_entropy, aes(x = Position, y = Entropy)) +
+  geom_line(alpha = 0.5) +
+  geom_point(data = subset(Lactuca_NRC_sensor_c3_entropy, Entropy > 1.5), aes(x = Position, y = Entropy), color = "#CC3333", size = 1) +
+  ylim(c(0,4.32)) +
+  xlim(c(0,974)) +
+  geom_hline(yintercept = 1.5, linetype = "dotted", color = "#6C6C6C", size = 0.35, alpha = 1) +
+  theme_custom2
+
+Lactuca_NRC_sensor_c3_entropy_p
+
+ggsave(filename = "/path/to/NRC_sensor_c3_entropy.svg", 
+       Lactuca_NRC_sensor_c3_entropy_p, width = 10, height = 1.5, dpi = "retina")
+```
+
+
+#### 5. Extract the regions of functionally important motifs:
+```{r}
+Lactuca_NRC_helper_MADA <- subseq(Lactuca_NRC_helper_aln, start = 1, end = 19)
+Lactuca_NRC_helper_Ploop <- subseq(Lactuca_NRC_helper_aln, start = 186, end = 195)
+Lactuca_NRC_helper_MHD <- subseq(Lactuca_NRC_helper_aln, start = 481, end = 483)
+
+
+Lactuca_NRC_sensor_MADA <- subseq(Lactuca_NRC_sensor_aln, start = 1, end = 19)
+Lactuca_NRC_sensor_Ploop <- subseq(Lactuca_NRC_sensor_aln, start = 234, end = 243)
+Lactuca_NRC_sensor_MHD <- subseq(Lactuca_NRC_sensor_aln, start = 529, end = 531)
+
+
+Lactuca_NRC_helper_MADA_df <- as.data.frame(Lactuca_NRC_helper_MADA)
+Lactuca_NRC_helper_Ploop_df <- as.data.frame(Lactuca_NRC_helper_Ploop)
+Lactuca_NRC_helper_MHD_df <- as.data.frame(Lactuca_NRC_helper_MHD)
+
+Lactuca_NRC_sensor_MADA_df <- as.data.frame(Lactuca_NRC_sensor_MADA)
+Lactuca_NRC_sensor_Ploop_df <- as.data.frame(Lactuca_NRC_sensor_Ploop)
+Lactuca_NRC_sensor_MHD_df <- as.data.frame(Lactuca_NRC_sensor_MHD)
+
+```
+
+#### 6. Plot them:
+##### Custom theme for generating the logos and the color scheme for the amino acids:
+```{r}
+theme_custom <- theme(
+  axis.text.x = element_blank(),
+  axis.text.y = element_blank(),
+  axis.ticks = element_blank(),
+  axis.title = element_blank(),
+  legend.position = "none",
+  panel.background = element_rect(fill = "transparent", colour = NA), # No fill, no border
+  plot.background = element_rect(fill = "transparent", colour = NA), # No fill, no border
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  plot.margin = unit(c(0,0,0,0), "lines"),
+  plot.title = element_blank(),
+  plot.subtitle = element_blank(),
+  plot.caption = element_blank(),
+  panel.border = element_blank()
+)
+
+color_scheme <- make_col_scheme(chars = c("K","R","H",
+                                          "D","E",
+                                          "A","V","L","I","W","F","M","Y",
+                                          "S","T","N","Q",
+                                          "P","C","G"),
+                                groups = c("1","1","1",
+                                           "2","2",
+                                           "3","3","3","3","3","3","3","3",
+                                           "4","4","4","4",
+                                           "5","5","5"),
+                                cols = c("#FF1F1F","#FF1F1F","#FF1F1F",
+                                         "#CC00CC","#CC00CC",
+                                         "#3333FF","#3333FF","#3333FF","#3333FF","#3333FF","#3333FF","#3333FF","#3333FF",
+                                         "#1FFF1F","#1FFF1F","#1FFF1F","#1FFF1F",
+                                         "#FFAE00","#FFAE00","#FFAE00"))
+```
+
+
+##### Helpers:
+```{r}
+Lactuca_NRC_helper_MADA_p <- ggplot() +
+    geom_logo(Lactuca_NRC_helper_MADA_df, col_scheme = color_scheme) +
+    theme_light() +
+    theme_custom
+  
+  ggsave("/path/to/Lactuca_NRC_helper_MADA.png",
+         Lactuca_NRC_helper_MADA_p, width = 19, height = 2, dpi = "retina")
+```
+
+```{r}
+Lactuca_NRC_helper_Ploop_p <- ggplot() +
+    geom_logo(Lactuca_NRC_helper_Ploop_df, col_scheme = color_scheme) +
+    theme_light() +
+    theme_custom
+  
+  ggsave("/path/to/Lactuca_NRC_helper_Ploop.png",
+         Lactuca_NRC_helper_Ploop_p, width = 10, height = 2, dpi = "retina")
+```
+
+```{r}
+Lactuca_NRC_helper_MHD_p <- ggplot() +
+    geom_logo(Lactuca_NRC_helper_MHD_df, col_scheme = color_scheme) +
+    theme_light() +
+    theme_custom
+  
+  ggsave("/path/to/Lactuca_NRC_helper_MHD.png",
+         Lactuca_NRC_helper_MHD_p, width = 3, height = 2, dpi = "retina")
+```
+
+
+##### Sensors:
+```{r}
+Lactuca_NRC_sensor_MADA_p <- ggplot() +
+    geom_logo(Lactuca_NRC_sensor_MADA_df, col_scheme = color_scheme) +
+    theme_light() +
+    theme_custom
+  
+  ggsave("/path/to/Lactuca_NRC_sensor_MADA.png",
+         Lactuca_NRC_sensor_MADA_p, width = 19, height = 2, dpi = "retina")
+```
+
+```{r}
+Lactuca_NRC_sensor_Ploop_p <- ggplot() +
+    geom_logo(Lactuca_NRC_sensor_Ploop_df, col_scheme = color_scheme) +
+    theme_light() +
+    theme_custom
+  
+  ggsave("/path/to/Lactuca_NRC_sensor_Ploop.png",
+         Lactuca_NRC_sensor_Ploop_p, width = 10, height = 2, dpi = "retina")
+```
+
+```{r}
+Lactuca_NRC_sensor_MHD_p <- ggplot() +
+    geom_logo(Lactuca_NRC_sensor_MHD_df, col_scheme = color_scheme) +
+    theme_light() +
+    theme_custom
+  
+  ggsave("/path/to/Lactuca_NRC_sensor_MHD.png",
+         Lactuca_NRC_sensor_MHD_p, width = 3, height = 2, dpi = "retina")
+```

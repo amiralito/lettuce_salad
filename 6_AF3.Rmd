@@ -1,0 +1,333 @@
+---
+title: "6_AF3"
+author: "AmirAli Toghani"
+date: "2025-02-14"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(Biostrings)
+library(jsonlite)
+library(svglite)
+```
+
+#### 1. Function to export AlphaFold 3 job json files:
+
+```{r}
+generate_alpha_fold_json <- function(sequences, sequence_counts = NULL, ligands = NULL, ligand_counts = NULL, seed_numbers = NULL, output_dir = "output_jsons", output_file = "AlphaFold_jobs.json", suffix = NULL) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir)
+  }
+  
+  # Replicate counts and seeds if single values are provided
+  if (!is.null(sequence_counts) && length(sequence_counts) == 1) {
+    sequence_counts <- rep(sequence_counts, length(sequences))
+  }
+  if (!is.null(ligand_counts) && length(ligand_counts) == 1) {
+    ligand_counts <- rep(ligand_counts, length(ligands))
+  }
+  if (!is.null(seed_numbers) && length(seed_numbers) == 1) {
+    seed_numbers <- rep(seed_numbers, length(sequences))
+  }
+  
+  # Validate ligand and count lengths
+  if (!is.null(ligands) && !is.null(ligand_counts) && length(ligands) != length(ligand_counts)) {
+    stop("Length of `ligands` and `ligand_counts` must match.")
+  }
+  
+  # Initialize a list to store all jobs
+  all_jobs <- list()
+  
+  # Loop through each sequence and create the JSON structure
+  for (i in seq_along(sequences)) {
+    # Sanitize sequence name (replace "." with "_")
+    sequence_name <- gsub("\\.", "_", names(sequences[i]))
+    sequence <- as.character(sequences[i])
+    sequence_count <- if (!is.null(sequence_counts)) as.numeric(sequence_counts[i]) else 1
+    
+    # Create job name using the sanitized sequence name, sequence count, and ligands
+    ligand_names <- if (!is.null(ligands)) paste(ligands, collapse = "_") else "NoLigand"
+    job_name <- paste(sequence_name, sequence_count, ligand_names, seed_numbers, suffix, sep = "_")
+    
+    # Get the seed number for the current job, or set to an empty list if not provided
+    seed <- if (!is.null(seed_numbers) && length(seed_numbers) >= i && !is.na(seed_numbers[i])) {
+      list(seed_numbers[i])
+    } else {
+      list()
+    }
+    
+    # Create the JSON structure for the current sequence
+    job <- list(
+      name = job_name,
+      modelSeeds = seed,
+      sequences = list(
+        list(
+          proteinChain = list(
+            sequence = sequence,
+            count = sequence_count
+          )
+        )
+      )
+    )
+    
+    # Add ligands if provided
+    if (!is.null(ligands)) {
+      ligand_list <- lapply(seq_along(ligands), function(j) {
+        list(
+          ligand = list(
+            ligand = ligands[j],
+            count = if (!is.null(ligand_counts)) as.numeric(ligand_counts[j]) else 1
+          )
+        )
+      })
+      job$sequences <- append(job$sequences, ligand_list)
+    }
+    
+    # Append the current job to the list of all jobs
+    all_jobs <- append(all_jobs, list(job))
+  }
+  
+  # Write the complete JSON structure to a single file
+  output_path <- file.path(output_dir, output_file)
+  write_json(all_jobs, path = output_path, pretty = TRUE, auto_unbox = TRUE)
+  
+  message("JSON file generated at ", output_path)
+}
+```
+
+#### 2. Generate and export the JSON files:
+
+```{r}
+
+# input sequences come from the previous scripts
+
+generate_alpha_fold_json(Lsativa_NRC_CCNBARC, 6, "CCD_OLA", 50, 1, "/path/to/AF3_jobs", "Lsativa_NRCs_CCNBARC.json")
+generate_alpha_fold_json(Lsativa_NRC_CCNBARC, 6, "CCD_OLA", 50, output_dir = "/path/to/AF3_jobs", output_file = "Lsativa_NRCs_CCNBARC_rep2.json", suffix = "rep2")
+generate_alpha_fold_json(Lsativa_NRC_CCNBARC, 6, "CCD_OLA", 50, output_dir = "/path/to/AF3_jobs", output_file = "Lsativa_NRCs_CCNBARC_rep3.json", suffix = "rep3")
+generate_alpha_fold_json(Lsativa_NRC_CCNBARC, 6, "CCD_OLA", 50, output_dir = "/path/to/AF3_jobs", output_file = "Lsativa_NRCs_CCNBARC_rep4.json", suffix = "rep4")
+generate_alpha_fold_json(Lsativa_NRC_CCNBARC, 6, "CCD_OLA", 50, output_dir = "/path/to/AF3_jobs", output_file = "Lsativa_NRCs_CCNBARC_rep5.json", suffix = "rep5")
+
+```
+
+#### 3. Custom functions for importing output json files:
+
+```{r}
+# Function to read and process a JSON file
+process_json <- function(file_path) {
+  summary_data <- fromJSON(file_path)
+  
+  if (str_detect(file_path, "_5_")) {
+    chain_pair_iptm <- summary_data$chain_pair_iptm[1:5, 1:5] %>% as.data.frame() %>% setNames(c(1:5))
+  } else if (str_detect(file_path, "_6_")) {
+    chain_pair_iptm <- summary_data$chain_pair_iptm[1:6, 1:6] %>% as.data.frame() %>% setNames(c(1:6))
+  } else {
+    chain_pair_iptm <- NULL
+  }
+  
+  list(summary = summary_data, chain_pair_iptm = chain_pair_iptm)
+}
+
+# Function to process all JSON files in a directory
+process_directory <- function(directory) {
+  file_list <- list.files(directory, pattern = "_summary_confidences_0.json", full.names = TRUE, recursive = TRUE)
+  data_list <- list()
+  
+  for (file_path in file_list) {
+    file_name <- tools::file_path_sans_ext(basename(file_path)) # Remove extension for cleaner name
+    processed_data <- process_json(file_path)
+    
+    if (!is.null(processed_data$chain_pair_iptm)) {
+      data_list[[file_name]] <- processed_data
+    }
+  }
+  
+  return(data_list)
+}
+```
+
+#### 4. Import the model metadata files and extract pTM, ipTM, and average per chain pTM:
+
+```{r}
+AF_rep_1_directory <- "/path/to/AF3/AF3_oligomer/Rep_1"
+AF_rep_2_directory <- "/path/to/AF3/AF3_oligomer/Rep_2"
+AF_rep_3_directory <- "/path/to/AF3/AF3_oligomer/Rep_3"
+AF_rep_4_directory <- "/path/to/AF3/AF3_oligomer/Rep_4"
+AF_rep_5_directory <- "/path/to/AF3/AF3_oligomer/Rep_5"
+
+
+AF_rep_1_data <- process_directory(AF_rep_1_directory)
+AF_rep_2_data <- process_directory(AF_rep_2_directory)
+AF_rep_3_data <- process_directory(AF_rep_3_directory)
+AF_rep_4_data <- process_directory(AF_rep_4_directory)
+AF_rep_5_data <- process_directory(AF_rep_5_directory)
+
+
+# extract the pTM, ipTM, and average per chain pTM information
+rep_1_df <- data.frame(name = character(), pTM = numeric(), ipTM = numeric(), chain_pTM = numeric(), stringsAsFactors = FALSE)
+rep_2_df <- data.frame(name = character(), pTM = numeric(), ipTM = numeric(), chain_pTM = numeric(), stringsAsFactors = FALSE)
+rep_3_df <- data.frame(name = character(), pTM = numeric(), ipTM = numeric(), chain_pTM = numeric(), stringsAsFactors = FALSE)
+rep_4_df <- data.frame(name = character(), pTM = numeric(), ipTM = numeric(), chain_pTM = numeric(), stringsAsFactors = FALSE)
+rep_5_df <- data.frame(name = character(), pTM = numeric(), ipTM = numeric(), chain_pTM = numeric(), stringsAsFactors = FALSE)
+
+
+## loop through lists of models for each replicate
+# first rep
+for (name in names(AF_rep_1_data)) {
+  # Extract the ptm and iptm values for the current entry
+  ptm_value <- AF_rep_1_data[[name]]$summary$ptm
+  iptm_value <- AF_rep_1_data[[name]]$summary$iptm
+  per_chain_ptm_value <- mean(AF_rep_1_data[[name]]$summary$chain_ptm[1:6])
+  
+  # Add the data to the dataframe
+  rep_1_df <- rbind(rep_1_df, data.frame(name = name, pTM = ptm_value, ipTM = iptm_value, chain_pTM = per_chain_ptm_value))
+}
+
+# second rep
+for (name in names(AF_rep_2_data)) {
+  ptm_value <- AF_rep_2_data[[name]]$summary$ptm
+  iptm_value <- AF_rep_2_data[[name]]$summary$iptm
+  per_chain_ptm_value <- mean(AF_rep_2_data[[name]]$summary$chain_ptm[1:6])
+  
+  rep_2_df <- rbind(rep_2_df, data.frame(name = name, pTM = ptm_value, ipTM = iptm_value, chain_pTM = per_chain_ptm_value))
+}
+
+
+# third rep
+for (name in names(AF_rep_3_data)) {
+  ptm_value <- AF_rep_3_data[[name]]$summary$ptm
+  iptm_value <- AF_rep_3_data[[name]]$summary$iptm
+  per_chain_ptm_value <- mean(AF_rep_3_data[[name]]$summary$chain_ptm[1:6])
+  
+  rep_3_df <- rbind(rep_3_df, data.frame(name = name, pTM = ptm_value, ipTM = iptm_value, chain_pTM = per_chain_ptm_value))
+}
+
+
+# fourth rep
+for (name in names(AF_rep_4_data)) {
+  ptm_value <- AF_rep_4_data[[name]]$summary$ptm
+  iptm_value <- AF_rep_4_data[[name]]$summary$iptm
+  per_chain_ptm_value <- mean(AF_rep_4_data[[name]]$summary$chain_ptm[1:6])
+  
+  rep_4_df <- rbind(rep_4_df, data.frame(name = name, pTM = ptm_value, ipTM = iptm_value, chain_pTM = per_chain_ptm_value))
+}
+
+
+# fifth rep
+for (name in names(AF_rep_5_data)) {
+  ptm_value <- AF_rep_5_data[[name]]$summary$ptm
+  iptm_value <- AF_rep_5_data[[name]]$summary$iptm
+  per_chain_ptm_value <- mean(AF_rep_5_data[[name]]$summary$chain_ptm[1:6])
+  
+  
+  rep_5_df <- rbind(rep_5_df, data.frame(name = name, pTM = ptm_value, ipTM = iptm_value, chain_pTM = per_chain_ptm_value))
+}
+
+
+# add a replicate name to each dataframe
+rep_1_df$replicate <- 1
+rep_2_df$replicate <- 2
+rep_3_df$replicate <- 3
+rep_4_df$replicate <- 4
+rep_5_df$replicate <- 5
+
+# modify the names to match the original IDs
+rep_1_df <- rep_1_df %>%
+  mutate(ID = gsub("fold_", "", name)) %>%
+  mutate(ID = gsub("_6_ccd_ola_summary_confidences_0", "", ID))
+
+rep_1_df <- rep_1_df[match(tolower(Lsativa_NRC_tree_ids$ID),rep_1_df$ID),]
+
+
+rep_2_df <- rep_2_df %>%
+  mutate(ID = gsub("fold_", "", name)) %>%
+  mutate(ID = gsub("_6_ccd_ola_rep2_summary_confidences_0", "", ID))
+
+rep_2_df <- rep_2_df[match(tolower(Lsativa_NRC_tree_ids$ID),rep_2_df$ID),]
+
+
+rep_3_df <- rep_3_df %>%
+  mutate(ID = gsub("fold_", "", name)) %>%
+  mutate(ID = gsub("_6_ccd_ola_rep3_summary_confidences_0", "", ID))
+
+rep_3_df <- rep_3_df[match(tolower(Lsativa_NRC_tree_ids$ID),rep_3_df$ID),]
+
+
+rep_4_df <- rep_4_df %>%
+  mutate(ID = gsub("fold_", "", name)) %>%
+  mutate(ID = gsub("_6_ccd_ola_rep4_summary_confidences_0", "", ID))
+
+rep_4_df <- rep_4_df[match(tolower(Lsativa_NRC_tree_ids$ID),rep_4_df$ID),]
+
+
+rep_5_df <- rep_5_df %>%
+  mutate(ID = gsub("fold_", "", name)) %>%
+  mutate(ID = gsub("_6_ccd_ola_rep5_summary_confidences_0", "", ID))
+
+rep_5_df <- rep_5_df[match(tolower(Lsativa_NRC_tree_ids$ID),rep_5_df$ID),]
+
+
+# merge all together
+AF3_metadata_df <- rbind(rep_1_df, rep_2_df, rep_3_df, rep_4_df, rep_5_df)
+AF3_metadata_df <- AF3_metadata_df[,-c(1)]
+AF3_metadata_df <- AF3_metadata_df[,c(5,4,1,2,3)]
+
+AF3_metadata_df$ID <- factor(AF3_metadata_df$ID, levels = unique(AF3_metadata_df$ID))
+
+write_csv(AF3_metadata_df, "/path/to/AF3_metadata.csv")
+
+```
+
+
+#### 5. Plot the metrics for the whole network:
+```{r}
+AF3_metadata_df_melted <- AF3_metadata_df %>%
+  pivot_longer(cols = c(pTM, ipTM, chain_pTM), names_to = "Metric", values_to = "Value")
+
+AF3_metadata_df_melted$Metric <- factor(AF3_metadata_df_melted$Metric, levels = unique(AF3_metadata_df_melted$Metric))
+AF3_metadata_df_melted$ID <- factor(AF3_metadata_df_melted$ID, levels = rev(unique(AF3_metadata_df_melted$ID)))
+
+
+AF3_metrics_p <- ggplot(AF3_metadata_df_melted, aes(y = ID, x = Value, color = Metric)) +
+  geom_boxplot() +
+  geom_jitter(size = 2, alpha = 0.6) +
+  facet_wrap(~ Metric, ncol = 3) +
+  scale_color_manual(values = c("pTM" = "#d00000", "ipTM" = "#ffba08", "chain_pTM" = "#a7c957")) +
+  theme_linedraw(base_size = 10) +
+  xlim(c(0,1))
+
+AF3_metrics_p
+
+ggsave(plot = AF3_metrics_p, filename = "/path/to/metrics_variant2.svg", 
+       width = 10, height = 8, dpi = "retina")
+
+```
+
+
+#### 6. Plot the metrics for the functional nodes:
+```{r}
+AF3_metadata_df_functional <- AF3_metadata_df[AF3_metadata_df$ID %in% tolower(Lsativa_NRC_functional_tree_ids$ID),]
+
+AF3_metadata_df_functional_melted <- AF3_metadata_df_functional %>%
+  pivot_longer(cols = c(pTM, ipTM, chain_pTM), names_to = "Metric", values_to = "Value")
+
+AF3_metadata_df_functional_melted$Metric <- factor(AF3_metadata_df_functional_melted$Metric, levels = unique(AF3_metadata_df_functional_melted$Metric))
+AF3_metadata_df_functional_melted$ID <- factor(AF3_metadata_df_functional_melted$ID, levels = unique(AF3_metadata_df_functional_melted$ID))
+
+
+AF3_metrics_functional_p <- ggplot(AF3_metadata_df_functional_melted, aes(y = Metric, x = Value, color = Metric)) +
+  geom_boxplot() +
+  geom_jitter(size = 1.5, alpha = 0.6) +
+  facet_wrap(~ ID, nrow = 18, strip.position = "left") +
+  scale_color_manual(values = c("pTM" = "#d00000", "ipTM" = "#ffba08", "chain_pTM" = "#a7c957")) +
+  theme_linedraw(base_size = 10) +
+  xlim(c(0,1))
+
+AF3_metrics_functional_p
+
+ggsave(plot = AF3_metrics_functional_p, filename = "/path/to/metrics_functional.svg", 
+       width = 5, height = 10, dpi = "retina")
+
+```

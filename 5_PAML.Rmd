@@ -276,7 +276,7 @@ color #2/a:471-879 #333234
 ```
 
 ```{r}
-c3_select_residues <- read_csv("/path/to/structure/Lactuca_sativa_Helixer_NC_056630.2_001736.1_CNL Annotations.csv")
+c3_select_residues <- read_csv("/path/to/AF3/Lactuca_sativa_Helixer_NC_056630.2_001736.1_CNL Annotations.csv")
 c3_select_residues <- c3_select_residues %>% filter(Type == "site")
 
 c3_select_residues_chiemrax <- paste0("color ","#1/a:",paste(c1_select_residues$Minimum, collapse = ","), " #FF2400")
@@ -284,7 +284,7 @@ c3_select_residues_chiemrax <- paste0("color ","#1/a:",paste(c1_select_residues$
 write(c3_select_residues_chiemrax,"/path/to/c3_color.txt")
 
 
-c1_select_residues <- read_csv("/path/to/structure/Lactuca_sativa_Helixer_NC_056630.2_000504.1_NL Annotations.csv")
+c1_select_residues <- read_csv("/path/to/AF3/Lactuca_sativa_Helixer_NC_056630.2_000504.1_NL Annotations.csv")
 c1_select_residues <- c1_select_residues %>% filter(Type == "site")
 
 c1_select_residues_chiemrax <- paste0("color ","#2/a:",paste(c1_select_residues$Minimum, collapse = ","), " #FF2400")
