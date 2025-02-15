@@ -38,5 +38,7 @@ BiocManager::install("GenomicRanges")
 
 
 Access the remaining supplementary data here:
+
 [Supporting material for "A hierarchical immune receptor network in lettuce reveals contrasting patterns of evolution in sensor and helper NLRs"](https://doi.org/10.5281/zenodo.14544899)
+
 [Deep-learning-based annotation of 230 superasterid genomes reveals a harmonized dataset of 91,366 NLRs (v250214_91366)](https://doi.org/10.5061/dryad.sxksn03d6)
