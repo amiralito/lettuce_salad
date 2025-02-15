@@ -22,7 +22,7 @@ install.packages("ggseqlogo")
 install.packages("entropy")
 install.packages("svglite")
 install.packages("pheatmap")
-install.packages("pheatmap")
+install.packages("reshape2")
 install.packages("jsonlite")
 
 
