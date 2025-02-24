@@ -1,0 +1,409 @@
+# Entropy calculations for AA Multiple Sequence Alignments (MSAs).
+
+Author: Andres Posbeyikian 
+Date created: 01/04/2024
+Last modified: 22/05/2024
+ 
+## 0. Load libraries
+```{r}
+suppressWarnings({ 
+library(entropy)
+library(ggseqlogo)
+library(Biostrings)
+library(ggplot2)
+library(openxlsx)
+library(readr)
+library(scales)
+library(dplyr)
+}) 
+```
+
+
+## 1. Set working and output directories, load raw alignment file, and set PATH to Clipkit
+```{r}
+# Set the working directory
+wd <- "/Users/posbeyik/Desktop/ZAR1_AF2_Mult/02_Analysis"
+setwd(wd)
+
+# Create a directory to save outputs to
+output_dir <- file.path(wd, "Entropy_Analysis")
+
+# Check if the directory already exists, and create it if it does not
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir)
+  message("Directory created at: ", output_dir)
+} else {
+  message("Directory already exists at: ", output_dir)
+}
+
+# Load the raw MSA file
+Raw_MSA_path <- "/Users/posbeyik/Desktop/ZAR1_AF2_Mult/02_Analysis/ZAR1_sequences.afa"
+Raw_MSA <- readAAStringSet(Raw_MSA_path)
+
+#--------------------------------#
+# You may need to first open a terminal and run the following, and then restart the R session:
+# > which clipkit
+# > export PATH="/path/to/clipkit:$PATH" #Replace the path with the result from running the first line.
+#--------------------------------#
+
+# Specify the full path to the ClipKIT executable
+clipkit_path <- "/Users/posbeyik/opt/anaconda3/bin/clipkit"
+```
+
+
+## 3. Convert the MSA into a DataFrame object
+```{r}
+# Function to convert a Biostrings/dataframe object to a dataframe and break the sequence into characters
+
+convert_to_dataframe <- function(alignment) {
+  # Extract sequences as strings
+  sequences <- sapply(alignment, as.character)
+  # Split each sequence into individual characters and convert to a matrix
+  alignment_matrix <- do.call(rbind, strsplit(sequences, ""))
+  # Convert the matrix to a dataframe
+  alignment_df <- as.data.frame(alignment_matrix, stringsAsFactors = FALSE)
+  # Naming columns as positions
+  colnames(alignment_df) <- paste(seq_len(ncol(alignment_df)))
+  
+  return(alignment_df)
+}
+
+Raw_MSA_df <- convert_to_dataframe(Raw_MSA)
+```
+
+## 4. Trim the alignment using Clipkit's tool, Gappy
+```{r}
+
+# Extracting the basename without extension and the extension
+file_base <- tools::file_path_sans_ext(basename(Raw_MSA_path))
+file_ext <- tools::file_ext(Raw_MSA_path)
+
+# Constructing the new output filename
+output_filename <- sprintf("%s_trimmed.%s", file_base, file_ext) # The ClipKit output will have the 'trimmed' suffix.
+output_path <- file.path(dirname(Raw_MSA_path), output_filename)
+
+# Output path for the log
+log_filename <- sprintf("%s.log", output_filename) 
+log_path <- file.path(dirname(Raw_MSA_path), log_filename)
+
+# Constructing the full ClipKIT command with the new output file specified
+args <- c(shQuote(Raw_MSA_path), "-l", "-m gappy", "-o", shQuote(output_path))
+
+# Execute the command
+result <- system2(clipkit_path, args, wait = TRUE)
+
+# Check if the command was successful
+if (result == 0) {
+    cat("ClipKIT ran successfully!\n")
+} else {
+    cat("ClipKIT encountered an error.\n")
+}
+```
+
+## 5. Load the trimmed alignment file and save it as a dataframe
+```{r}
+Trimmed_MSA <- readAAStringSet(output_path)
+Trimmed_MSA_df <- convert_to_dataframe(Trimmed_MSA)
+```
+
+## 6. Define a function to calculate Entropy values
+```{r}
+# Function to calculate entropy for multiple columns and return as a dataframe
+calculate_entropy_df <- function(dataframe) {
+  # Function to calculate entropy for a single column
+  calculate_column_entropy <- function(column) {
+    # Remove any NA values (if there are any)
+    column <- na.omit(column)
+    # Calculate frequencies
+    freq_table <- table(column)
+    # Convert to proportions
+    proportions <- freq_table / sum(freq_table)
+    # Calculate and return entropy
+    entropy.empirical(proportions, unit = "log2")
+  }
+  
+  # Ensure that the dataframe is processed column-wise
+  entropy_values <- sapply(dataframe, calculate_column_entropy, simplify = FALSE)
+  
+  # Flatten the list if necessary
+  if (is.list(entropy_values)) {
+    entropy_values <- unlist(entropy_values)
+  }
+  
+  # Create a dataframe with positions and entropy values
+  entropy_df <- data.frame(Position = seq_along(entropy_values), Entropy = entropy_values)
+  
+  return(entropy_df)
+}
+```
+
+## 7. Calculate the entropy values for the trimmed MSA
+```{r}
+Trimmed_MSA_entropy <- calculate_entropy_df(Trimmed_MSA_df)
+
+# Save an excel file with the entropy values:
+write.xlsx(Trimmed_MSA_entropy, file.path(output_dir,'Trimmed_MSA_Entropy.xlsx'))
+```
+
+## 8. Map entropy scores with original positions in untrimmed alignment
+```{r}
+# The entropy analysis is performed on the trimmed alignment. Therefore, some aminoacids that were in the full MSA have been excluded and do not have an entropy score assigned to them. Positions in the trimmed alignment are not the same as positions in the raw alignment. To correct for this, we need to re-calculate the original positions of the residues.
+
+# We check which columns (aminoacids) in the raw MSA were trimmed, and re-assign the original positions for the entropy values.
+
+
+# Read Gappy's log file
+# Adjust the sep (separator) and header arguments based on the log file's format
+log_data <- read_table(log_path, col_names = c("position", "trimmed/kept", "parsimony","gappyness"), col_types = cols())
+
+
+total_rows <- nrow(log_data)
+trim_pos <- 1
+
+#Create an empty list 'trimmed_positions_list'
+trimmed_positions_list <- list()
+
+#Start a for loop from 1 to the total number of rows in the dataframe
+for (i in 1:total_rows) {
+  #Fetch the value from column 'position' of the dataframe at the current index
+  position_i <- log_data$position[i]
+  
+  #Fetch the value from column 'trimmed/kept' of the dataframe at the current index
+  status_i <- log_data$`trimmed/kept`[i]
+
+  # Check the value of 'status_i'
+  if (status_i == 'trim') {
+    # If 'status_i' is 'trim', append NA to 'trimmed_positions_list'
+    trimmed_positions_list[[i]] <- NA
+  } else if (status_i == 'keep') {
+    # If 'status_i' is 'keep', append 'trim_pos' to 'trimmed_positions_list'
+    trimmed_positions_list[[i]] <- trim_pos
+    # Increment 'trim_pos' by 1
+    trim_pos <- trim_pos + 1
+  }
+}
+
+# Convert list to a vector for appending to dataframe
+trimmed_positions_vector <- unlist(trimmed_positions_list)
+
+# Append this vector as a new column named 'trimmed position' to 'log_data'
+log_data$`trimmed position` <- trimmed_positions_vector
+
+merged_dataframe <- merge(log_data, Trimmed_MSA_entropy, by.x = "trimmed position", by.y = "Position", all.x = TRUE)
+
+# Exporting Data
+# Select the columns we want to export
+Raw_Position_Entropy_annotation_df <- merged_dataframe[, c("position", "Entropy")]
+
+#Transpose the dataframe
+t_Raw_Position_Entropy_annotation_df <- as.data.frame(t(Raw_Position_Entropy_annotation_df))
+
+# Set the column names of transposed_df to the values of its first row
+colnames(t_Raw_Position_Entropy_annotation_df) <- as.character(t_Raw_Position_Entropy_annotation_df[1, ])
+# Remove the now redundant first row
+t_Raw_Position_Entropy_annotation_df <- t_Raw_Position_Entropy_annotation_df[-1, ]
+
+row_to_append <- t_Raw_Position_Entropy_annotation_df[1, ]  # Select the row to append
+Raw_MSA_df <- rbind(Raw_MSA_df, row_to_append)
+
+# Export to a .txt file
+write.table(Raw_MSA_df, file.path(output_dir,"Raw_MSA_Entropy.csv"), sep = ",", row.names = TRUE, col.names = TRUE)
+
+```
+
+## 9. Process entropy data for each sequence in the MSA. Make format easier for export into ChimeraX.
+```{r}
+process_MSA_Data <- function(df) {
+  # Initialize a list to collect data for each species
+  results_list <- list()
+  
+  # Iterate through each row, except the row named 'Entropy'
+  for (i in 1:nrow(df)) {
+    if (rownames(df)[i] != "Entropy") {
+      species_name = rownames(df)[i]
+      
+      # Create a list to store vectors of amino acid and entropy score
+      species_data <- list()
+
+      # Iterate through each column
+      for (j in 1:ncol(df)) {
+        amino_acid <- df[i, j]
+        
+        # Skip gaps in the alignment (amino acid == "-")
+        if (amino_acid == "-") {
+          next
+        }
+        entropy_score <- df['Entropy', j]
+        
+        # Append the vector (amino_acid, entropy_score) to the species list
+        species_data[[length(species_data) + 1]] <- c(amino_acid, as.numeric(entropy_score))
+      }
+
+      # Add the list for this species to the results list
+      results_list[[species_name]] <- species_data
+    }
+  }
+
+  # Return the results list
+  return(results_list)
+}
+
+MSA_species_list <- process_MSA_Data(Raw_MSA_df)
+```
+
+## 10. Generating a dataframe for one species of interest
+```{r}
+# Define the function to create a dataframe for a given species name
+create_species_dataframe <- function(species_name, MSA_species_list) {
+  # Get the list of tuples for the given species
+  species_data <- MSA_species_list[[species_name]]
+  
+  # Initialize vectors to store position, amino acid identity, and entropy
+  positions <- 1:length(species_data)
+  amino_acids <- vector("character", length(species_data))
+  entropy_scores <- vector("numeric", length(species_data))
+  
+  # Loop through each position to extract amino acid identity and entropy
+  for (i in seq_along(species_data)) {
+    amino_acids[i] <- species_data[[i]][1]
+    entropy_scores[i] <- species_data[[i]][2]
+  }
+  
+  # Create a dataframe with the collected data
+  species_df <- data.frame(
+    Position = positions,
+    AminoAcid = amino_acids,
+    Entropy = entropy_scores
+  )
+  
+  # Convert the 'Entropy' column to numeric (floats), keeping non-numeric as NA
+  species_df$Entropy <- suppressWarnings(as.numeric(species_df$Entropy))
+  return(species_df)
+}
+
+# Example usage
+# Assuming MSA_species_list is already defined and populated
+species_name <- "AXY05280.1_Nicotiana_benthamiana"
+species_df <- create_species_dataframe(species_name, MSA_species_list)
+
+# Print the resulting dataframe
+print(species_df)
+
+```
+
+## 11. Chimera-X coloring commands
+```{r}
+
+map_entropy_to_hex <- function(df, color_min, color_max) {
+  # Ensure the 'Entropy' column exists
+  if (!"Entropy" %in% colnames(df)) {
+    stop("DataFrame must contain an 'Entropy' column.")
+  }
+  
+  # Calculate min and max of the entropy
+  min_entropy <- min(df$Entropy, na.rm = TRUE)
+  max_entropy <- max(df$Entropy, na.rm = TRUE)
+  
+  # Create a colormap including white as the midpoint color
+  colormap <- colorRampPalette(c(color_min, "white", color_max))
+  
+  # Normalize entropy values and apply the colormap
+  df$Hex_Code <- sapply(df$Entropy, function(x) {
+    normalized <- (x - min_entropy) / (max_entropy - min_entropy)
+    colormap(100)[round(normalized * 99) + 1]
+  })
+  
+  return(df)
+}
+
+# Define hex colors for min and max
+color_min <- '#1d4b8e'  # Lowest Entropy
+color_max <- '#db282b'  # Highest Entropy
+
+# Apply the function
+hex_species_df <- map_entropy_to_hex(species_df, color_min, color_max)
+
+# We remove all NA values
+noNA_hex_species_df <- hex_species_df[!is.na(hex_species_df$Entropy), ]
+
+# Writing the ChimeraX command into a text file
+# Assuming your dataframe is called 'data' and the text file is named 'colors.txt'
+
+# Open a connection to a text file
+output_file <- file("/Users/posbeyik/Desktop/For AA/Chimera_X_Commands/ChimeraX_commands.txt", open = "wt")
+
+
+# Modified midway entropy to value of 1.5 / Code by GPT4:
+
+map_entropy_to_hex <- function(df, color_min, color_max) {
+  # Ensure the 'Entropy' column exists
+  if (!"Entropy" %in% colnames(df)) {
+    stop("DataFrame must contain an 'Entropy' column.")
+  }
+  
+  # Calculate min and max of the entropy
+  min_entropy <- min(df$Entropy, na.rm = TRUE)
+  max_entropy <- max(df$Entropy, na.rm = TRUE)
+  
+  # Hardcode the midpoint entropy value
+  midpoint_entropy <- 1.5
+  
+  # Check if the midpoint entropy is within the current range
+  if (midpoint_entropy < min_entropy || midpoint_entropy > max_entropy) {
+    stop("The fixed midpoint entropy of 1.5 is outside the range of data entropy.")
+  }
+  
+  # Calculate lengths of the color map segments
+  lower_scale_length <- round(100 * (midpoint_entropy - min_entropy) / (max_entropy - min_entropy))
+  upper_scale_length <- 100 - lower_scale_length
+  
+  # Create color gradients
+  lower_colormap <- colorRampPalette(c(color_min, "white"))(lower_scale_length)
+  upper_colormap <- colorRampPalette(c("white", color_max))(upper_scale_length)
+  
+  # Combine the two color maps
+  colormap <- c(lower_colormap, upper_colormap)
+  
+  # Normalize entropy values and apply the colormap
+  df$Hex_Code <- sapply(df$Entropy, function(x) {
+    if (x <= midpoint_entropy) {
+      normalized <- (x - min_entropy) / (midpoint_entropy - min_entropy)
+      index <- round(normalized * (lower_scale_length - 1)) + 1
+      return(lower_colormap[index])
+    } else {
+      normalized <- (x - midpoint_entropy) / (max_entropy - midpoint_entropy)
+      index <- round(normalized * (upper_scale_length - 1)) + 1
+      return(upper_colormap[index])
+    }
+  })
+  
+  return(df)
+}
+
+# Apply the function
+hex_species_df <- map_entropy_to_hex(species_df, color_min, color_max)
+
+# Remove all NA values
+noNA_hex_species_df <- hex_species_df[!is.na(hex_species_df$Entropy), ]
+
+# Continue with file output if needed
+output_file <- file("/Users/posbeyik/Desktop/For AA/Chimera_X_Commands/ChimeraX_commands.txt", open = "wt")
+
+
+
+
+
+
+# Iterate over each row and write the formatted string to the file
+apply(noNA_hex_species_df, 1, function(row) {
+  position <- row['Position']
+  hex_code <- row['Hex_Code']
+  line <- paste0("color /a:", position, " ", hex_code)
+  writeLines(line, output_file)
+})
+
+# Close the connection to the text file
+close(output_file)
+
+```
+
