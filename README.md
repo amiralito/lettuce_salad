@@ -3,7 +3,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14544899.svg)](https://doi.org/10.5281/zenodo.14544899)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14720919.svg)](https://doi.org/10.5281/zenodo.14720919)
 [![DOI](https://img.shields.io/badge/bioRxiv-doi.org/10.1101/2025.02.25.639832-BE2634)](https://doi.org/10.1101/2025.02.25.639832)
-[![DOI](https://img.shields.io/badge/Drayd-10.5061/dryad.sxksn03d6-138808)](https://doi.org/10.5061/dryad.sxksn03d6)
+[![DOI](https://img.shields.io/badge/Dryad-10.5061/dryad.sxksn03d6-138808)](https://doi.org/10.5061/dryad.sxksn03d6)
 
 Hsuan Pai, Toshiyuki Sakai, Andres Posbeyikian, Raoul Frijters, Hiroaki Adachi, Sophien Kamoun, AmirAli Toghani
 
