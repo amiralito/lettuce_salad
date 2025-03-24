@@ -22,8 +22,8 @@ library(ggseqlogo)
 #### 1. Import the amino acid alignments for helpers and sensors:
 
 ```{r}
-Lactuca_NRC_helper_aln <- readAAStringSet("/Users/toghani/Desktop/Lettuce_salad/analysis/lactuca/phylogeny/Lactuca_NRC_helper_seq.afa")
-Lactuca_NRC_sensor_aln <- readAAStringSet("/Users/toghani/Desktop/Lettuce_salad/analysis/lactuca/phylogeny/Lactuca_NRC_sensor_seq_trimmed.afa")
+Lactuca_NRC_helper_aln <- readAAStringSet("/path/to/Lactuca_NRC_helper_seq.afa")
+Lactuca_NRC_sensor_aln <- readAAStringSet("/path/to/Lactuca_NRC_sensor_seq_trimmed.afa")
 
 # extract the sensor subclades
 Lactuca_NRC_sensor_c1_aln <- Lactuca_NRC_sensor_aln[Lactuca_NRC_sensor_c1_clade$tip.label]
